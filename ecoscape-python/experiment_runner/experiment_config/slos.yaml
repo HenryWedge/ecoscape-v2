@@ -1,0 +1,18 @@
+prometheus:
+  url: "http://kube1-1:30335"
+slos:
+  - name: "energy-consumption"
+    query: "sum by (container_namespace)(irate(kepler_container_dram_joules_total{container_namespace=~'scalablemine-hkr-sut', pod_name=~'.*'}[60s])) + sum by (container_namespace)(irate(kepler_container_package_joules_total{container_namespace=~'scalablemine-hkr-sut', pod_name=~'.*'}[60s]))"
+    threshold: 120
+    isBiggerBetter: false
+    weight: 0.25
+  - name: "processing-latency"
+    query: "avg(latency{namespace=~'scalablemine-hkr-monitor'}!=0)"
+    threshold: 1.5
+    isBiggerBetter: false
+    weight: 0.5
+  - name: "accuracy"
+    query: "avg(accuracy{namespace=~'scalablemine-hkr-monitor'}!=0)"
+    threshold: 0.75
+    isBiggerBetter: true
+    weight: 0.25

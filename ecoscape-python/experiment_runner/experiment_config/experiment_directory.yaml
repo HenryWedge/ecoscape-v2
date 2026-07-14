@@ -1,0 +1,5 @@
+infra: "infra"
+sut: "sut"
+load: "load"
+chaos: "chaos"
+monitor: "monitor"

@@ -1,0 +1,6 @@
+infraDelay: 0
+loadDelay: 20
+evalDelay: 20
+chaosDelay: 20
+repetitions: 1
+duration: 60

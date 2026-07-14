@@ -1,0 +1,1 @@
+kubectl delete cm sut-config load-config chaos-config infra-config monitor-config experiment-config

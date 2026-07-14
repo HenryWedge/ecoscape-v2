@@ -1,0 +1,182 @@
+apiVersion: cau-se.de/v1alpha1
+kind: Experiment
+metadata:
+  name: reliability-benchmark-full
+  namespace: ecoscape
+  labels:
+    app.kubernetes.io/name: ecoscape
+    app.kubernetes.io/managed-by: ecoscape-operator
+  annotations:
+    description: "Full reliability benchmark with 3 SLOs and fault injection"
+spec:
+  executionMode: FullExperimentRun
+  duration:
+    loadDelay: 30
+    evalDelay: 20
+    chaosDelay: 30
+    measurementDuration: 120
+    repetitions: 3
+    pauseBetweenRepetitions: 60
+  manifests:
+    sut:
+      configMapRef:
+        name: sut-manifests
+    load:
+      configMapRef:
+        name: load-manifests
+    infra:
+      configMapRef:
+        name: infra-manifests
+    chaos:
+      configMapRef:
+        name: chaos-manifests
+    monitor:
+      configMapRef:
+        name: monitor-manifests
+  prometheus:
+    url: http://prometheus-k8s.monitoring:9090
+    queryTimeoutSeconds: 10
+  slos:
+    - name: processing-latency
+      displayName: "Processing Latency (P99)"
+      description: "99th percentile stream processing latency"
+      query: "histogram_quantile(0.99, avg(rate(processing_latency_bucket[5m])) by (le))"
+      threshold: 0.5
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 0.4
+    - name: energy-consumption
+      displayName: "Energy Consumption (DRAM + Package)"
+      description: "Combined DRAM and package energy consumption via Kepler"
+      query: >
+        sum by (container_namespace)(
+          irate(kepler_container_dram_joules_total{
+            container_namespace=~'.*sut'
+          }[60s])
+        )
+        +
+        sum by (container_namespace)(
+          irate(kepler_container_package_joules_total{
+            container_namespace=~'.*sut'
+          }[60s])
+        )
+      threshold: 150.0
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 0.35
+    - name: accuracy
+      displayName: "Processing Accuracy"
+      description: "Average accuracy of the stream processing pipeline"
+      query: "avg(accuracy{namespace=~'.*monitor'} != 0)"
+      threshold: 0.80
+      thresholdDirection: GreaterThanOrEqual
+      isBiggerBetter: true
+      weight: 0.25
+    - name: consumer-group-lag
+      displayName: "Kafka Consumer Group Lag"
+      description: "Max consumer group lag across all topics"
+      query: "max(kafka_consumer_lag)"
+      threshold: 1000
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 0.0
+status:
+  phase: Succeeded
+  experimentId: "xqkzm"
+  startTime: "2026-06-17T10:00:00Z"
+  completionTime: "2026-06-17T10:12:30Z"
+  repetitionsCompleted: 3
+  currentRepetition: 3
+
+  manifestConfigMaps:
+    - name: ecoscape-xqkzm-sut
+    - name: ecoscape-xqkzm-load
+    - name: ecoscape-xqkzm-infra
+    - name: ecoscape-xqkzm-chaos
+    - name: ecoscape-xqkzm-monitor
+
+  sloResults:
+    - name: processing-latency
+      violationScore: 0.12
+      meanSli: 0.43
+      evaluations: 510
+    - name: energy-consumption
+      violationScore: 0.23
+      meanSli: 172.4
+      evaluations: 510
+    - name: accuracy
+      violationScore: 0.05
+      meanSli: 0.77
+      evaluations: 510
+    - name: consumer-group-lag
+      violationScore: 0.0
+      meanSli: 234.0
+      evaluations: 510
+
+  aggregateScore: 0.1375
+
+  conditions:
+    - type: Completed
+      status: "True"
+      reason: ExperimentSucceeded
+      lastTransitionTime: "2026-06-17T10:12:30Z"
+      message: "Experiment completed 3/3 repetitions successfully."
+---
+apiVersion: cau-se.de/v1alpha1
+kind: Experiment
+metadata:
+  name: load-test-quick
+  namespace: ecoscape
+  labels:
+    app.kubernetes.io/name: ecoscape
+    purpose: quick-check
+spec:
+  executionMode: LoadTest
+  duration:
+    loadDelay: 5
+    chaosDelay: 0
+    evalDelay: 5
+    measurementDuration: 30
+    repetitions: 1
+  manifests:
+    load:
+      configMapRef:
+        name: load-manifests
+  prometheus:
+    url: http://prometheus-k8s.monitoring:9090
+  slos:
+    - name: processing-latency
+      query: "avg(latency{namespace=~'.*monitor'} != 0)"
+      threshold: 2.0
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 1.0
+---
+apiVersion: cau-se.de/v1alpha1
+kind: Experiment
+metadata:
+  name: infra-only-deploy
+  namespace: ecoscape
+spec:
+  executionMode: SystemDeployer
+  duration:
+    repetitions: 1
+  manifests:
+    sut:
+      configMapRef:
+        name: sut-manifests
+    infra:
+      configMapRef:
+        name: infra-manifests
+    monitor:
+      configMapRef:
+        name: monitor-manifests
+  prometheus:
+    url: http://prometheus-k8s.monitoring:9090
+  slos:
+    - name: system-running
+      query: "count(kube_pod_status_phase{phase='Running'})"
+      threshold: 1
+      thresholdDirection: GreaterThanOrEqual
+      isBiggerBetter: true
+      weight: 1.0

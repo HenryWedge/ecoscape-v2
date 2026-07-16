@@ -1,0 +1,313 @@
+---
+# cm-sut.yaml — wraps all infrastructure manifests that form the System Under Test:
+#   namespaces (with ResourceQuota + LimitRange), Redis, redis-exporter, aggregator.
+#
+# Ecoscape applies this ConfigMap in the "sut" phase (ExecutionMode: FullExperimentRun).
+# Each key is treated as an independent YAML manifest file and applied in order.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-sensor-pipeline-sut
+  namespace: default
+data:
+  01-redis-berlin.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: redis
+      namespace: zone-berlin
+      labels:
+        app: redis
+        zone: berlin
+    spec:
+      selector:
+        app: redis
+        zone: berlin
+      ports:
+        - name: redis
+          port: 6379
+          targetPort: 6379
+  01a-redis-berlin.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: redis
+      namespace: zone-berlin
+      labels:
+        app: redis
+        zone: berlin
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: redis
+          zone: berlin
+      template:
+        metadata:
+          labels:
+            app: redis
+            zone: berlin
+        spec:
+          containers:
+            - name: redis
+              image: redis:7-alpine
+              ports:
+                - containerPort: 6379
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+              readinessProbe:
+                exec:
+                  command: ["redis-cli", "ping"]
+                initialDelaySeconds: 5
+                periodSeconds: 5
+  02-redis-munich.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: redis
+      namespace: zone-munich
+      labels:
+        app: redis
+        zone: munich
+    spec:
+      selector:
+        app: redis
+        zone: munich
+      ports:
+        - name: redis
+          port: 6379
+          targetPort: 6379
+  02b-redis-munich.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: redis
+      namespace: zone-munich
+      labels:
+        app: redis
+        zone: munich
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: redis
+          zone: munich
+      template:
+        metadata:
+          labels:
+            app: redis
+            zone: munich
+        spec:
+          containers:
+            - name: redis
+              image: redis:7-alpine
+              ports:
+                - containerPort: 6379
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "128Mi"
+              readinessProbe:
+                exec:
+                  command: ["redis-cli", "ping"]
+                initialDelaySeconds: 5
+                periodSeconds: 5
+
+  # ── redis-exporter (one per zone) ─────────────────────────────────────────
+  03-redis-exporter-berlin.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: redis-exporter
+      namespace: zone-berlin
+      labels:
+        app: redis-exporter
+        zone: berlin
+    spec:
+      selector:
+        app: redis-exporter
+        zone: berlin
+      ports:
+        - name: metrics
+          port: 9121
+          targetPort: 9121
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: redis-exporter
+      namespace: zone-berlin
+      labels:
+        app: redis-exporter
+        zone: berlin
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: redis-exporter
+          zone: berlin
+      template:
+        metadata:
+          labels:
+            app: redis-exporter
+            zone: berlin
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9121"
+        spec:
+          containers:
+            - name: redis-exporter
+              image: oliver006/redis_exporter:v1.62.0-alpine
+              env:
+                - name: REDIS_ADDR
+                  value: "redis://redis.zone-berlin.svc:6379"
+              ports:
+                - containerPort: 9121
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"
+
+  04-redis-exporter-munich.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: redis-exporter
+      namespace: zone-munich
+      labels:
+        app: redis-exporter
+        zone: munich
+    spec:
+      selector:
+        app: redis-exporter
+        zone: munich
+      ports:
+        - name: metrics
+          port: 9121
+          targetPort: 9121
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: redis-exporter
+      namespace: zone-munich
+      labels:
+        app: redis-exporter
+        zone: munich
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: redis-exporter
+          zone: munich
+      template:
+        metadata:
+          labels:
+            app: redis-exporter
+            zone: munich
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9121"
+        spec:
+          containers:
+            - name: redis-exporter
+              image: oliver006/redis_exporter:v1.62.0-alpine
+              env:
+                - name: REDIS_ADDR
+                  value: "redis://redis.zone-munich.svc:6379"
+              ports:
+                - containerPort: 9121
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"
+
+  # ── Aggregator ────────────────────────────────────────────────────────────
+  05-aggregator.yaml: |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: aggregator
+      namespace: aggregator
+      labels:
+        app: aggregator
+    spec:
+      selector:
+        app: aggregator
+      ports:
+        - name: metrics
+          port: 8000
+          targetPort: 8000
+  05a-aggregator.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: aggregator
+      namespace: aggregator
+      labels:
+        app: aggregator
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: aggregator
+      template:
+        metadata:
+          labels:
+            app: aggregator
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "8000"
+            prometheus.io/path: "/metrics"
+        spec:
+          containers:
+            - name: aggregator
+              image: ecoscape/edge-aggregator:latest
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: ZONES
+                  value: "berlin:redis.zone-berlin.svc:6379,munich:redis.zone-munich.svc:6379"
+                - name: STREAM_NAME
+                  value: "sensor-data"
+                - name: CONSUMER_GROUP
+                  value: "aggregator"
+                - name: CONSUMER_NAME
+                  value: "agg-0"
+                - name: WINDOW
+                  value: "60"
+                - name: INTERVAL_MS
+                  value: "500"
+                - name: OFFLINE_TIMEOUT_S
+                  value: "5"
+                - name: METRICS_PORT
+                  value: "8000"
+              ports:
+                - name: metrics
+                  containerPort: 8000
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "64Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "256Mi"
+              readinessProbe:
+                httpGet:
+                  path: /metrics
+                  port: 8000
+                initialDelaySeconds: 5
+                periodSeconds: 10

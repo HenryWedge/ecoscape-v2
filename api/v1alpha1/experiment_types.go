@@ -120,6 +120,12 @@ type ExperimentSpec struct {
 	// References to ConfigMaps containing Kubernetes manifests.
 	// +optional
 	Manifests ManifestsConfig `json:"manifests,omitempty"`
+	// Reference to a Topology object (same namespace) that defines the edge zones
+	// for this experiment. If set, the experiment waits for the Topology to reach
+	// phase Applied before deploying the SUT. The Topology lifecycle is independent
+	// of the experiment — it is not deleted on cleanup.
+	// +optional
+	TopologyRef *corev1.LocalObjectReference `json:"topologyRef,omitempty"`
 	// Prometheus connection configuration.
 	Prometheus PrometheusConfig `json:"prometheus"`
 	// Service Level Objective definitions.
@@ -175,6 +181,9 @@ type ExperimentStatus struct {
 	// Random 5-character experiment identifier.
 	// +optional
 	ExperimentID string `json:"experimentId,omitempty"`
+	// Name of the Topology used in this experiment run (set if topologyRef was provided).
+	// +optional
+	TopologyRef string `json:"topologyRef,omitempty"`
 	// Timestamp when the experiment started.
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`

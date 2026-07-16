@@ -171,7 +171,7 @@ func runInit(cmd *cobra.Command, opts *initOptions) error {
 	}
 
 	experiment := &unstructured.Unstructured{}
-	experiment.SetAPIVersion("experiment.cau-se.de/v1alpha1")
+	experiment.SetAPIVersion("ecoscape.cau-se.de/v1alpha1")
 	experiment.SetKind("Experiment")
 	experiment.SetName(opts.name)
 	experiment.SetNamespace(opts.namespace)
@@ -196,7 +196,7 @@ func generateExperimentYAML(opts *initOptions, configMapNames map[string]string)
 		manifestEntries += fmt.Sprintf("    %s:\n      configMapRef:\n        name: %s\n", role.roleKey, cmName)
 	}
 
-	yamlContent := fmt.Sprintf(`apiVersion: experiment.cau-se.de/v1alpha1
+	yamlContent := fmt.Sprintf(`apiVersion: ecoscape.cau-se.de/v1alpha1
 kind: Experiment
 metadata:
   name: %s

@@ -1,0 +1,108 @@
+---
+# cm-load.yaml — wraps the producer deployments (one per zone).
+# Ecoscape applies this ConfigMap in the "load" phase, after the SUT is running.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-sensor-pipeline-load
+  namespace: default
+data:
+  01-producer-berlin.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: producer
+      namespace: zone-berlin
+      labels:
+        app: producer
+        zone: berlin
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: producer
+          zone: berlin
+      template:
+        metadata:
+          labels:
+            app: producer
+            zone: berlin
+        spec:
+          containers:
+            - name: producer
+              image: ecoscape/edge-producer:latest
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: ZONE
+                  value: "berlin"
+                - name: REDIS_HOST
+                  value: "redis.zone-berlin.svc"
+                - name: REDIS_PORT
+                  value: "6379"
+                - name: INTERVAL_MS
+                  value: "500"
+                - name: VALUE_BASE
+                  value: "20.0"
+                - name: VALUE_DRIFT
+                  value: "5.0"
+                - name: STREAM_NAME
+                  value: "sensor-data"
+                - name: STREAM_MAXLEN
+                  value: "10000"
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "200m"
+                  memory: "128Mi"
+
+  02-producer-munich.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: producer
+      namespace: zone-munich
+      labels:
+        app: producer
+        zone: munich
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: producer
+          zone: munich
+      template:
+        metadata:
+          labels:
+            app: producer
+            zone: munich
+        spec:
+          containers:
+            - name: producer
+              image: ecoscape/edge-producer:latest
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: ZONE
+                  value: "munich"
+                - name: REDIS_HOST
+                  value: "redis.zone-munich.svc:"
+                - name: REDIS_PORT
+                  value: "6379"
+                - name: INTERVAL_MS
+                  value: "500"
+                - name: VALUE_BASE
+                  value: "22.0"
+                - name: VALUE_DRIFT
+                  value: "3.0"
+                - name: STREAM_NAME
+                  value: "sensor-data"
+                - name: STREAM_MAXLEN
+                  value: "10000"
+              resources:
+                requests:
+                  cpu: "50m"
+                  memory: "32Mi"
+                limits:
+                  cpu: "100m"
+                  memory: "64Mi"

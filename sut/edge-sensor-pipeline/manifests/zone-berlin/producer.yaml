@@ -1,0 +1,49 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: zone-berlin
+  labels:
+    app: producer
+    zone: berlin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: producer
+      zone: berlin
+  template:
+    metadata:
+      labels:
+        app: producer
+        zone: berlin
+    spec:
+      containers:
+        - name: producer
+          image: ecoscape/edge-producer:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ZONE
+              value: "berlin"
+            - name: REDIS_HOST
+              value: "redis.zone-berlin.svc"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: INTERVAL_MS
+              value: "500"
+            - name: VALUE_BASE
+              value: "20.0"
+            - name: VALUE_DRIFT
+              value: "5.0"
+            - name: STREAM_NAME
+              value: "sensor-data"
+            - name: STREAM_MAXLEN
+              value: "10000"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"

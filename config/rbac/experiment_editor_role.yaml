@@ -1,7 +1,7 @@
 # This rule is not used by the project ecoscape itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants permissions to create, update, and delete resources within the experiment.cau-se.de.
+# Grants permissions to create, update, and delete resources within the ecoscape.cau-se.de.
 # This role is intended for users who need to manage these resources
 # but should not control RBAC or manage permissions for others.
 
@@ -14,7 +14,7 @@ metadata:
   name: experiment-editor-role
 rules:
 - apiGroups:
-  - experiment.cau-se.de
+  - ecoscape.cau-se.de
   resources:
   - experiments
   verbs:
@@ -26,7 +26,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - experiment.cau-se.de
+  - ecoscape.cau-se.de
   resources:
   - experiments/status
   verbs:

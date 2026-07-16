@@ -1,0 +1,41 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zone-berlin
+  labels:
+    ecoscape.cau-se.de/edge-zone: "true"
+    topology.kubernetes.io/zone: berlin
+---
+# ResourceQuota: simulates a well-equipped edge node (e.g. industrial gateway)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: edge-quota
+  namespace: zone-berlin
+spec:
+  hard:
+    requests.cpu: "1000m"
+    limits.cpu: "2000m"
+    requests.memory: "1Gi"
+    limits.memory: "2Gi"
+---
+# LimitRange: enforces per-container defaults so pods without explicit limits
+# still get capped at the zone profile.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: edge-limits
+  namespace: zone-berlin
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "256Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "64Mi"
+      max:
+        cpu: "1000m"
+        memory: "1Gi"

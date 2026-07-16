@@ -1,0 +1,40 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zone-munich
+  labels:
+    ecoscape.cau-se.de/edge-zone: "true"
+    topology.kubernetes.io/zone: munich
+---
+# ResourceQuota: simulates a constrained edge device (e.g. Raspberry Pi class)
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: edge-quota
+  namespace: zone-munich
+spec:
+  hard:
+    requests.cpu: "250m"
+    limits.cpu: "500m"
+    requests.memory: "256Mi"
+    limits.memory: "512Mi"
+---
+# LimitRange: tighter per-container caps for the constrained zone
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: edge-limits
+  namespace: zone-munich
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "200m"
+        memory: "128Mi"
+      defaultRequest:
+        cpu: "50m"
+        memory: "32Mi"
+      max:
+        cpu: "500m"
+        memory: "256Mi"

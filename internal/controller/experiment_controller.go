@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -42,6 +44,7 @@ func derefOr(duration *int32, fallback int32) int32 {
 type sliCollector struct {
 	name       string
 	config     experimentv1alpha1.SLOConfig
+	mu         sync.Mutex
 	values     []float64
 	violations int32
 }
@@ -51,6 +54,8 @@ func newSLICollector(sloConfig experimentv1alpha1.SLOConfig) *sliCollector {
 }
 
 func (collector *sliCollector) record(value float64, threshold float64, isBiggerBetter bool) {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
 	collector.values = append(collector.values, value)
 	if isBiggerBetter {
 		if value < threshold {
@@ -202,9 +207,10 @@ type ExperimentReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=experiment.cau-se.de,resources=experiments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=experiment.cau-se.de,resources=experiments/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=experiment.cau-se.de,resources=experiments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments/finalizers,verbs=update
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=topologies,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods;services;endpoints;events;namespaces,verbs=get;list;watch;create;update;patch;delete
@@ -258,6 +264,19 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 	experiment.Status.StartTime = &now
 	experiment.Status.CurrentRepetition = 1
 
+	// If a Topology is referenced, record it in the status and wait until it is Applied.
+	if experiment.Spec.TopologyRef != nil {
+		experiment.Status.TopologyRef = experiment.Spec.TopologyRef.Name
+		if err := reconciler.Status().Update(ctx, experiment); err != nil {
+			return fmt.Errorf("status update: %w", err)
+		}
+		logger.Info("waiting for topology", "topology", experiment.Spec.TopologyRef.Name, "namespace", namespace)
+		if err := reconciler.waitForTopology(ctx, namespace, experiment.Spec.TopologyRef.Name); err != nil {
+			return fmt.Errorf("topology not ready: %w", err)
+		}
+		logger.Info("topology is Applied, proceeding")
+	}
+
 	if err := reconciler.Status().Update(ctx, experiment); err != nil {
 		return fmt.Errorf("status update: %w", err)
 	}
@@ -281,44 +300,57 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 			derefOr(experiment.Spec.Prometheus.QueryTimeoutSeconds, 10))
 
 		if shouldDeploy := reconciler.isModeDeploySystem(experiment); shouldDeploy {
-			reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Sut, experimentID, "sut", &ownedConfigMaps)
-			reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Infra, experimentID, "infra", &ownedConfigMaps)
-			reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Monitor, experimentID, "monitor", &ownedConfigMaps)
+			if err := reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Sut, experimentID, "sut", &ownedConfigMaps); err != nil {
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return err
+			}
+			if err := reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Infra, experimentID, "infra", &ownedConfigMaps); err != nil {
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return err
+			}
+			if err := reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Monitor, experimentID, "monitor", &ownedConfigMaps); err != nil {
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return err
+			}
 		}
 		if reconciler.isModeStartLoad(experiment) {
-			reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Load, experimentID, "load", &ownedConfigMaps)
+			if err := reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Load, experimentID, "load", &ownedConfigMaps); err != nil {
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return err
+			}
 		}
 		experiment.Status.ManifestConfigMaps = ownedConfigMaps
 		_ = reconciler.Status().Update(ctx, experiment)
 
 		logger.Info("waiting load delay", "seconds", loadDelay)
-		if err := sleepWithContext(ctx, time.Duration(loadDelay)*time.Second); err != nil {
-			reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
-			return err
-		}
-
-		logger.Info("pre-chaos evaluation", "seconds", chaosDelay)
-		for second := int32(0); second < chaosDelay; second++ {
+		for second := int32(0); second < loadDelay; second++ {
+			remaining := loadDelay - second
+			logger.Info("load delay countdown", "remaining_seconds", remaining)
 			if err := sleepWithContext(ctx, time.Second); err != nil {
 				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
 				return err
 			}
-			evaluateAll(ctx, prometheusClient, collectors)
+		}
+
+		logger.Info("pre-chaos evaluation", "seconds", chaosDelay)
+		if err := runEvaluationWindow(ctx, "pre-chaos evaluation", chaosDelay, prometheusClient, collectors); err != nil {
+			reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+			return err
 		}
 
 		if reconciler.isModeApplyChaos(experiment) {
-			reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Chaos, experimentID, "chaos", &ownedConfigMaps)
+			if err := reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Chaos, experimentID, "chaos", &ownedConfigMaps); err != nil {
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return err
+			}
 			experiment.Status.ManifestConfigMaps = ownedConfigMaps
 			_ = reconciler.Status().Update(ctx, experiment)
 		}
 
 		logger.Info("chaos evaluation", "seconds", measurementDuration)
-		for second := int32(0); second < measurementDuration; second++ {
-			if err := sleepWithContext(ctx, time.Second); err != nil {
-				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
-				return err
-			}
-			evaluateAll(ctx, prometheusClient, collectors)
+		if err := runEvaluationWindow(ctx, "chaos evaluation", measurementDuration, prometheusClient, collectors); err != nil {
+			reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+			return err
 		}
 
 		repetitionResult := makeRepetitionResult(repetition, collectors)
@@ -335,8 +367,12 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 
 		if repetition < repetitions {
 			logger.Info("pausing before next repetition", "seconds", pauseBetweenRepetitions)
-			if err := sleepWithContext(ctx, time.Duration(pauseBetweenRepetitions)*time.Second); err != nil {
-				return err
+			for second := int32(0); second < pauseBetweenRepetitions; second++ {
+				remaining := pauseBetweenRepetitions - second
+				logger.Info("pause countdown", "remaining_seconds", remaining)
+				if err := sleepWithContext(ctx, time.Second); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -350,15 +386,16 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 	return nil
 }
 
-func (reconciler *ExperimentReconciler) applyManifestSet(ctx context.Context, namespace string, manifestRef *experimentv1alpha1.ManifestRef, experimentID, role string, owned *[]string) {
+func (reconciler *ExperimentReconciler) applyManifestSet(ctx context.Context, namespace string, manifestRef *experimentv1alpha1.ManifestRef, experimentID, role string, owned *[]string) error {
 	if manifestRef == nil {
-		return
+		return nil
 	}
 	ownedName := fmt.Sprintf("ecoscape-%s-%s", experimentID, role)
-	*owned = append(*owned, ownedName)
 	if err := reconciler.deployManifests(ctx, namespace, manifestRef.ConfigMapRef.Name, ownedName); err != nil {
-		log.FromContext(ctx).Error(err, "failed to deploy manifests", "role", role)
+		return fmt.Errorf("deploy %s manifests: %w", role, err)
 	}
+	*owned = append(*owned, ownedName)
+	return nil
 }
 
 func (reconciler *ExperimentReconciler) cleanup(ctx context.Context, namespace string, ownedConfigMaps []string, experiment *experimentv1alpha1.Experiment) {
@@ -446,12 +483,56 @@ func makeCollectors(slos []experimentv1alpha1.SLOConfig) []*sliCollector {
 }
 
 func evaluateAll(ctx context.Context, prometheusClient *prometheusClient, collectors []*sliCollector) {
+	logger := log.FromContext(ctx)
 	for _, collector := range collectors {
 		value, found, err := prometheusClient.query(ctx, collector.config.Query)
-		if err != nil || !found {
+		if err != nil {
+			logger.Error(err, "prometheus query failed", "query", collector.config.Query)
 			continue
 		}
+		if !found {
+			logger.Info("prometheus query returned no result", "query", collector.config.Query)
+			continue
+		}
+		logger.Info(strconv.FormatFloat(value, 'f', 2, 64))
 		collector.record(value, collector.config.Threshold, collector.config.IsBiggerBetter)
+	}
+}
+
+// runEvaluationWindow runs an evaluation window for the given duration.
+// A Prometheus query round is fired every second as a goroutine so that query
+// latency does not inflate the wall-clock duration of the window.
+// The window ends after exactly `seconds` seconds regardless of in-flight queries;
+// it then waits for all goroutines to finish before returning.
+func runEvaluationWindow(ctx context.Context, label string, seconds int32, prometheusClient *prometheusClient, collectors []*sliCollector) error {
+	logger := log.FromContext(ctx)
+	duration := time.Duration(seconds) * time.Second
+	deadline := time.NewTimer(duration)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	var wg sync.WaitGroup
+	elapsed := int32(0)
+
+	for {
+		select {
+		case <-ctx.Done():
+			wg.Wait()
+			return ctx.Err()
+		case <-deadline.C:
+			wg.Wait()
+			return nil
+		case <-ticker.C:
+			elapsed++
+			remaining := seconds - elapsed
+			logger.Info(label+" countdown", "remaining_seconds", remaining)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				evaluateAll(ctx, prometheusClient, collectors)
+			}()
+		}
 	}
 }
 
@@ -494,6 +575,49 @@ func sleepWithContext(ctx context.Context, duration time.Duration) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+// waitForTopology polls until the named Topology in the given namespace reaches
+// phase Applied. It returns an error if the Topology reaches Failed phase or if
+// the context-aware timeout (5 minutes) is exceeded.
+func (reconciler *ExperimentReconciler) waitForTopology(ctx context.Context, namespace, name string) error {
+	const totalTimeout = 5 * time.Minute
+	timeout := time.After(totalTimeout)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	start := time.Now()
+	logger := log.FromContext(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timeout waiting for Topology %s/%s to reach Applied phase", namespace, name)
+		case <-ticker.C:
+			elapsed := time.Since(start).Round(time.Second)
+			remaining := (totalTimeout - elapsed).Round(time.Second)
+			topology := &experimentv1alpha1.Topology{}
+			err := reconciler.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, topology)
+			if err != nil {
+				if errors.IsNotFound(err) {
+					// Topology not yet created — keep waiting.
+					logger.Info("waiting for topology to be created", "topology", name, "elapsed", elapsed, "timeout_in", remaining)
+					continue
+				}
+				return fmt.Errorf("get Topology %s/%s: %w", namespace, name, err)
+			}
+			switch topology.Status.Phase {
+			case experimentv1alpha1.TopologyPhaseApplied:
+				return nil
+			case experimentv1alpha1.TopologyPhaseFailed:
+				return fmt.Errorf("Topology %s/%s is in Failed phase", namespace, name)
+			}
+			// Pending or phase not yet set — keep waiting.
+			logger.Info("waiting for topology to reach Applied phase", "topology", name, "phase", topology.Status.Phase, "elapsed", elapsed, "timeout_in", remaining)
+		}
 	}
 }
 

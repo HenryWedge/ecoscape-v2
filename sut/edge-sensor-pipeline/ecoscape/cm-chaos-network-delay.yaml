@@ -1,0 +1,32 @@
+---
+# cm-chaos-network-delay.yaml
+# Scenario: Simulates poor uplink connectivity on zone Munich (LTE-like conditions).
+# 200ms latency + 50ms jitter on all traffic from Munich Redis pods.
+# Expected effect: aggregator_stream_lag{zone="munich"} rises gradually,
+#                  rolling average values arrive stale.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-sensor-pipeline-chaos-network-delay
+  namespace: default
+data:
+  01-network-delay-munich.yaml: |
+    apiVersion: chaos-mesh.org/v1alpha1
+    kind: NetworkChaos
+    metadata:
+      name: munich-lte-delay
+      namespace: zone-munich
+    spec:
+      action: delay
+      mode: all
+      selector:
+        namespaces:
+          - zone-munich
+        labelSelectors:
+          app: redis
+      delay:
+        latency: "200ms"
+        jitter: "50ms"
+        correlation: "75"
+      direction: both
+      duration: "60s"

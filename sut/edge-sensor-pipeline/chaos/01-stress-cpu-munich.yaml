@@ -1,0 +1,17 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: munich-cpu-throttle
+  namespace: zone-munich
+spec:
+  mode: all
+  selector:
+    namespaces:
+      - zone-munich
+    labelSelectors:
+      app: producer
+  stressors:
+    cpu:
+      workers: 2
+      load: 80
+  duration: "60s"

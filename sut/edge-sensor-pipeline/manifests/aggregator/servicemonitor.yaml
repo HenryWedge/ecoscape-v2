@@ -1,0 +1,61 @@
+---
+# ServiceMonitor for the aggregator — scraped by Prometheus Operator
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: aggregator
+  namespace: aggregator
+  labels:
+    app: aggregator
+spec:
+  selector:
+    matchLabels:
+      app: aggregator
+  endpoints:
+    - port: metrics
+      interval: 5s
+      path: /metrics
+---
+# ServiceMonitor for redis-exporter in zone-berlin
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-exporter-berlin
+  namespace: zone-berlin
+  labels:
+    app: redis-exporter
+    zone: berlin
+spec:
+  selector:
+    matchLabels:
+      app: redis-exporter
+      zone: berlin
+  endpoints:
+    - port: metrics
+      interval: 5s
+      path: /metrics
+      relabelings:
+        - targetLabel: zone
+          replacement: berlin
+---
+# ServiceMonitor for redis-exporter in zone-munich
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-exporter-munich
+  namespace: zone-munich
+  labels:
+    app: redis-exporter
+    zone: munich
+spec:
+  selector:
+    matchLabels:
+      app: redis-exporter
+      zone: munich
+  endpoints:
+    - port: metrics
+      interval: 5s
+      path: /metrics
+      relabelings:
+        - targetLabel: zone
+          replacement: munich

@@ -1,0 +1,7 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aggregator
+  labels:
+    ecoscape.cau-se.de/role: aggregator

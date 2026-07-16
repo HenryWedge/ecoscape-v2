@@ -1,0 +1,71 @@
+---
+# cm-monitor.yaml — ServiceMonitors for Prometheus Operator.
+# Apply this if your cluster has the Prometheus Operator installed.
+# If using plain Prometheus with annotation-based scraping, the annotations
+# on the pods (prometheus.io/scrape: "true") are sufficient.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-sensor-pipeline-monitor
+  namespace: default
+data:
+  01-servicemonitor-aggregator.yaml: |
+    apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: aggregator
+      namespace: aggregator
+      labels:
+        app: aggregator
+    spec:
+      selector:
+        matchLabels:
+          app: aggregator
+      endpoints:
+        - port: metrics
+          interval: 5s
+          path: /metrics
+
+  02-servicemonitor-redis-berlin.yaml: |
+    apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: redis-exporter-berlin
+      namespace: zone-berlin
+      labels:
+        app: redis-exporter
+        zone: berlin
+    spec:
+      selector:
+        matchLabels:
+          app: redis-exporter
+          zone: berlin
+      endpoints:
+        - port: metrics
+          interval: 5s
+          path: /metrics
+          relabelings:
+            - targetLabel: zone
+              replacement: berlin
+
+  03-servicemonitor-redis-munich.yaml: |
+    apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: redis-exporter-munich
+      namespace: zone-munich
+      labels:
+        app: redis-exporter
+        zone: munich
+    spec:
+      selector:
+        matchLabels:
+          app: redis-exporter
+          zone: munich
+      endpoints:
+        - port: metrics
+          interval: 5s
+          path: /metrics
+          relabelings:
+            - targetLabel: zone
+              replacement: munich

@@ -1,0 +1,2 @@
+redis==7.4.1
+prometheus_client==0.20.0

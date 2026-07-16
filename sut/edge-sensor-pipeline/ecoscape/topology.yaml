@@ -1,0 +1,85 @@
+# Topology — Edge Sensor Pipeline Topologie
+#
+# Dieses Beispiel modelliert das "Edge Sensor Pipeline" SUT mit zwei Edge-Zonen
+# und einer Cloud-Zone.
+#
+# Was der Controller daraus macht:
+#
+#   Namespaces:
+#     two-zone-edge-cloud   (Labels: edge-zone=true, zone=cloud)
+#     two-zone-edge-berlin  (Labels: edge-zone=true, zone=berlin)
+#     two-zone-edge-munich  (Labels: edge-zone=true, zone=munich)
+#
+#   ResourceQuotas (je Namespace):
+#     two-zone-edge-cloud   → limits.cpu=4, limits.memory=8Gi, limits.ephemeral-storage=100Gi
+#     two-zone-edge-berlin  → limits.cpu=2, limits.memory=2Gi,  limits.ephemeral-storage=20Gi
+#     two-zone-edge-munich  → limits.cpu=500m, limits.memory=512Mi, limits.ephemeral-storage=8Gi
+#
+#   NetworkChaos (für jeden Link, je aktive Eigenschaft ein Objekt):
+#     Link cloud↔berlin:
+#       et-two-zone-edge-berlin-cloud-delay      (delay: 30ms ± 5ms)
+#       et-two-zone-edge-berlin-cloud-bandwidth  (rate: 50mbps)
+#     Link cloud↔munich:
+#       et-two-zone-edge-cloud-munich-delay      (delay: 150ms ± 30ms)
+#       et-two-zone-edge-cloud-munich-bandwidth  (rate: 5mbps)
+#       et-two-zone-edge-cloud-munich-loss       (loss: 10%)
+#     Link berlin↔munich:
+#       et-two-zone-edge-berlin-munich-delay     (delay: 15ms ± 2ms)
+#
+# Hinweis: Die Namespaces ersetzen die manuell angelegten zone-berlin/zone-munich
+# Namespaces aus den Einzelmanifesten. Passe die Producer/Aggregator-Deployments
+# entsprechend an (namespace: two-zone-edge-berlin, etc.) oder lege die Topologie
+# mit einem kürzeren Namen an (z.B. name: esp).
+---
+apiVersion: ecoscape.cau-se.de/v1alpha1
+kind: Topology
+metadata:
+  name: two-zone-edge
+  namespace: default
+spec:
+  zones:
+    # Cloud-Zone: großzügige Ressourcen, fungiert als "Rechenzentrum"
+    - name: cloud
+      cpu:
+        limit: "4000m"
+      memory:
+        limit: "8Gi"
+      disk:
+        capacity: "100Gi"
+
+    # Berlin: industrieller Edge-Node (z.B. Raspberry Pi 5 oder Intel NUC)
+    - name: berlin
+      cpu:
+        limit: "2000m"
+      memory:
+        limit: "2Gi"
+      disk:
+        capacity: "20Gi"
+
+    # Munich: stark eingeschränktes IoT-Gerät (z.B. Raspberry Pi 3, ESP32-Klasse)
+    - name: munich
+      cpu:
+        limit: "500m"
+      memory:
+        limit: "512Mi"
+      disk:
+        capacity: "8Gi"
+
+  links:
+    # Cloud ↔ Berlin: gute Anbindung, leichte Latenz
+    - zones: [cloud, berlin]
+      latency: "30ms"
+      jitter: "5ms"
+      bandwidth: "50Mbps"
+
+    # Cloud ↔ Munich: schlechte Mobilfunkanbindung (LTE unter Last)
+    - zones: [cloud, munich]
+      latency: "150ms"
+      jitter: "30ms"
+      bandwidth: "5Mbps"
+      packetLoss: "10"
+
+    # Berlin ↔ Munich: direkte Verbindung im lokalen Edge-Netz
+    - zones: [berlin, munich]
+      latency: "15ms"
+      jitter: "2ms"

@@ -1,4 +1,4 @@
-apiVersion: experiment.cau-se.de/v1alpha1
+apiVersion: ecoscape.cau-se.de/v1alpha1
 kind: Experiment
 metadata:
   labels:

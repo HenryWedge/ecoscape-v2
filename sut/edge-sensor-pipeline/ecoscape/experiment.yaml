@@ -1,0 +1,119 @@
+---
+# experiment.yaml — Ecoscape Experiment CR for the Edge Sensor Pipeline SUT.
+#
+# Ablauf:
+#   0. Topology "two-zone-edge" muss Applied sein (der Controller wartet bis zu 5 min)
+#   1. SUT deployen (Redis + Aggregator in den Zonen-Namespaces)        ← cm-sut
+#   2. Lastgenerator starten (Producer in zone-berlin und zone-munich)  ← cm-load
+#   3. Monitoring deployen (ServiceMonitor für Aggregator)              ← cm-monitor
+#   4. 30 s warten bis die Pipeline stabil ist
+#   5. Baseline messen: 30 s pre-Chaos SLO-Evaluierung (1 s Takt)
+#   6. Chaos injizieren                                                 ← cm-chaos-network-partition
+#   7. 60 s Chaos-Phase messen (1 s Takt)
+#   8. SUT + Load + Chaos abräumen, RepetitionResult schreiben
+#   --- Pause 60 s ---
+#   Schritte 1–8 insgesamt 3× wiederholen
+#   9. results-ConfigMap schreiben: ecoscape-<id>-results
+#
+# Topology-Integration:
+#   spec.topologyRef.name zeigt auf das Topology-Objekt im selben Namespace
+#   (ecoscape-system). Der Controller wartet, bis diese Topology Applied ist,
+#   bevor er das SUT deployt. Die Topology wird NICHT beim Cleanup gelöscht —
+#   sie lebt unabhängig und kann von mehreren Experimenten referenziert werden.
+#
+# Chaos-Szenarien wechseln (spec.manifests.chaos):
+#   edge-sensor-pipeline-chaos-network-delay    → RTT-Erhöhung
+#   edge-sensor-pipeline-chaos-network-partition → Berlin-Partition
+#   edge-sensor-pipeline-chaos-stress-munich    → CPU/Mem-Stress
+#
+# Voraussetzungen:
+#   1. Operator läuft: make run  (oder deployed in ecoscape-system)
+#   2. Topology deployt: kubectl apply -f ecoscape/topology.yaml
+#   3. ConfigMaps deployt: kubectl apply -f ecoscape/
+#   4. Producer- und Aggregator-Images im Cluster verfügbar
+#   5. Prometheus erreichbar unter der URL in spec.prometheus.url
+apiVersion: ecoscape.cau-se.de/v1alpha1
+kind: Experiment
+metadata:
+  name: edge-sensor-pipeline-partition
+  namespace: default
+spec:
+  executionMode: FullExperimentRun
+
+  # Referenz auf die Topology, die Zonen-Namespaces + NetworkChaos anlegt.
+  # Der Controller wartet bis topology.status.phase == Applied (max. 5 min).
+  topologyRef:
+    name: two-zone-edge
+
+  duration:
+    loadDelay: 10
+    chaosDelay: 10
+    measurementDuration: 60
+    repetitions: 1
+    pauseBetweenRepetitions: 0
+
+  manifests:
+    sut:
+      configMapRef:
+        name: edge-sensor-pipeline-sut
+    load:
+      configMapRef:
+        name: edge-sensor-pipeline-load
+    monitor:
+      configMapRef:
+        name: edge-sensor-pipeline-monitor
+    chaos:
+      # Szenarien: chaos-network-delay | chaos-network-partition | chaos-stress-munich
+      configMapRef:
+        name: edge-sensor-pipeline-chaos-network-partition
+
+  prometheus:
+    url: "http://localhost:9090"
+    queryTimeoutSeconds: 10
+
+  slos:
+    - name: stream-lag-berlin
+      displayName: "Berlin Stream Lag"
+      description: >
+        Anzahl ungelesener Nachrichten im Berliner Redis-Stream.
+        Hoher Lag bedeutet, dass der Aggregator Berlin nicht mehr erreicht.
+      query: 'redis_stream_length{namespace="two-zone-edge-berlin"}'
+      threshold: 50
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 0.35
+
+    - name: stream-lag-munich
+      displayName: "Munich Stream Lag"
+      description: >
+        Anzahl ungelesener Nachrichten im Münchener Redis-Stream.
+      query: 'redis_stream_length{namespace="two-zone-edge-munich"}'
+      threshold: 50
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 0.35
+
+    - name: zone-availability
+      displayName: "Zone Availability"
+      description: >
+        Anteil der Zeit, in der mindestens eine Zone offline war (Aggregator
+        empfing keine Daten). Niedrigere Werte sind besser.
+      query: |
+        sum(rate(aggregator_zone_offline_seconds_total[1m]))
+        /
+        (count(aggregator_zone_avg) > 0)
+      threshold: 0.05
+      thresholdDirection: LessThanOrEqual
+      isBiggerBetter: false
+      weight: 0.20
+
+    - name: sensor-throughput
+      displayName: "Sensor Message Throughput"
+      description: >
+        Gesamtdurchsatz an Nachrichten pro Sekunde über alle Zonen.
+        Einbrüche zeigen Producer- oder Netzwerkprobleme an.
+      query: 'sum(rate(aggregator_messages_consumed_total[1m]))'
+      threshold: 3.5
+      thresholdDirection: GreaterThanOrEqual
+      isBiggerBetter: true
+      weight: 0.10

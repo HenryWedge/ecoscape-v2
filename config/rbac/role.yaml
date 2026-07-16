@@ -12,6 +12,7 @@ rules:
   - events
   - namespaces
   - pods
+  - resourcequotas
   - serviceaccounts
   - services
   verbs:
@@ -46,6 +47,47 @@ rules:
   - watch
 - apiGroups:
   - chaos-mesh.org
+  resources:
+  - '*'
+  - networkchaoses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ecoscape.cau-se.de
+  resources:
+  - experiments
+  - topologies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ecoscape.cau-se.de
+  resources:
+  - experiments/finalizers
+  - topologies/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - ecoscape.cau-se.de
+  resources:
+  - experiments/status
+  - topologies/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - kafka.strimzi.io
   resources:
   - '*'
@@ -57,32 +99,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - experiment.cau-se.de
-  resources:
-  - experiments
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - experiment.cau-se.de
-  resources:
-  - experiments/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - experiment.cau-se.de
-  resources:
-  - experiments/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - monitoring.coreos.com
   resources:

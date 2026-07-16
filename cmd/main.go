@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -56,6 +57,7 @@ func init() {
 
 // nolint:gocyclo
 func main() {
+	fmt.Println("KUBECONFIG ENV:", os.Getenv("KUBECONFIG"))
 	var metricsAddr string
 	var metricsCertPath, metricsCertName, metricsCertKey string
 	var webhookCertPath, webhookCertName, webhookCertKey string
@@ -207,6 +209,14 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Experiment")
+		os.Exit(1)
+	}
+
+	if err = (&controller.TopologyReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Topology")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

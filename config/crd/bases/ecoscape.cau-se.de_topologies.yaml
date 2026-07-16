@@ -1,0 +1,255 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: topologies.ecoscape.cau-se.de
+spec:
+  group: ecoscape.cau-se.de
+  names:
+    kind: Topology
+    listKind: TopologyList
+    plural: topologies
+    shortNames:
+    - top
+    singular: topology
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Topology describes a multi-zone edge computing environment.
+          The controller translates zone resource profiles into Kubernetes ResourceQuotas
+          and zone link conditions into Chaos Mesh NetworkChaos objects, providing a
+          single declarative surface for edge topology simulation.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TopologySpec defines the desired state of a Topology.
+            properties:
+              links:
+                description: |-
+                  Symmetric network links between zone pairs.
+                  If a pair is not listed, no network chaos is applied between those zones.
+                items:
+                  description: |-
+                    ZoneLinkSpec describes a symmetric network link between exactly two zones.
+                    The controller translates each non-empty field into a dedicated NetworkChaos
+                    object (one per Chaos Mesh action type: delay, bandwidth, loss).
+                    Links are symmetric: the same conditions apply in both directions.
+                  properties:
+                    bandwidth:
+                      description: |-
+                        Maximum bandwidth on this link (e.g. "50Mbps", "1Mbps").
+                        Maps to NetworkChaos action: bandwidth.
+                      type: string
+                    jitter:
+                      description: Latency jitter / variance (e.g. "5ms"). Only effective
+                        when Latency is set.
+                      type: string
+                    latency:
+                      description: |-
+                        Additional round-trip latency on this link (e.g. "30ms").
+                        Maps to NetworkChaos action: delay.
+                      type: string
+                    packetLoss:
+                      description: |-
+                        Packet loss percentage as a plain number string (e.g. "5" for 5%).
+                        Maps to NetworkChaos action: loss.
+                      type: string
+                    zones:
+                      description: |-
+                        Exactly two zone names that this link connects.
+                        Both names must appear in spec.zones[].name.
+                      items:
+                        type: string
+                      maxItems: 2
+                      minItems: 2
+                      type: array
+                  required:
+                  - zones
+                  type: object
+                type: array
+              zones:
+                description: List of edge zones. Each zone gets its own namespace
+                  and ResourceQuota.
+                items:
+                  description: |-
+                    ZoneSpec describes a single edge zone.
+                    The controller creates a dedicated namespace named "<topology-name>-<zone-name>"
+                    and applies ResourceQuota constraints derived from the resource fields below.
+                  properties:
+                    cpu:
+                      description: CPU resource limits for this zone.
+                      properties:
+                        limit:
+                          description: Maximum CPU available in the zone (e.g. "500m",
+                            "2").
+                          type: string
+                      required:
+                      - limit
+                      type: object
+                    disk:
+                      description: Disk / ephemeral storage limits for this zone.
+                      properties:
+                        capacity:
+                          description: Maximum ephemeral storage available in the
+                            zone (e.g. "8Gi", "100Gi").
+                          type: string
+                      required:
+                      - capacity
+                      type: object
+                    memory:
+                      description: Memory resource limits for this zone.
+                      properties:
+                        limit:
+                          description: Maximum memory available in the zone (e.g.
+                            "512Mi", "2Gi").
+                          type: string
+                      required:
+                      - limit
+                      type: object
+                    name:
+                      description: |-
+                        Unique name of the zone within this topology (e.g. "berlin", "cloud").
+                        The resulting namespace will be "<topology-name>-<zone-name>".
+                      type: string
+                  required:
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+            required:
+            - zones
+            type: object
+          status:
+            description: TopologyStatus defines the observed state of a Topology.
+            properties:
+              conditions:
+                description: Standard Kubernetes conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              networkChaosRefs:
+                description: |-
+                  Names of all NetworkChaos objects created for link conditions.
+                  Stored here so the controller can clean them up on deletion.
+                items:
+                  type: string
+                type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the .metadata.generation that was last successfully reconciled.
+                  Used to avoid redundant reconcile runs when only the status subresource changes.
+                format: int64
+                type: integer
+              phase:
+                description: Current lifecycle phase.
+                enum:
+                - Pending
+                - Applied
+                - Failed
+                type: string
+              zones:
+                description: Per-zone observed state.
+                items:
+                  description: ZoneStatus captures the observed state of a single
+                    zone.
+                  properties:
+                    name:
+                      description: Zone name (matches ZoneSpec.Name).
+                      type: string
+                    namespace:
+                      description: Namespace created for this zone.
+                      type: string
+                    resourceQuotaRef:
+                      description: Name of the ResourceQuota applied in the zone namespace.
+                      type: string
+                  required:
+                  - name
+                  - namespace
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

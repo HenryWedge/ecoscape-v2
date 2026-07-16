@@ -1,0 +1,478 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: experiments.ecoscape.cau-se.de
+spec:
+  group: ecoscape.cau-se.de
+  names:
+    kind: Experiment
+    listKind: ExperimentList
+    plural: experiments
+    singular: experiment
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.aggregateScore
+      name: Score
+      type: number
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Experiment is the Schema for the experiments API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ExperimentSpec defines the desired state of Experiment.
+            properties:
+              duration:
+                description: Timing configuration for experiment phases.
+                properties:
+                  chaosDelay:
+                    description: Delay before chaos injection (seconds).
+                    format: int32
+                    type: integer
+                  evalDelay:
+                    description: Delay before full SLO evaluation starts (seconds).
+                    format: int32
+                    type: integer
+                  loadDelay:
+                    description: Delay before starting load generation (seconds).
+                    format: int32
+                    type: integer
+                  measurementDuration:
+                    description: Duration of the chaos evaluation phase (seconds).
+                    format: int32
+                    type: integer
+                  pauseBetweenRepetitions:
+                    default: 60
+                    description: Pause between repetitions in seconds.
+                    format: int32
+                    type: integer
+                  repetitions:
+                    default: 1
+                    description: Number of experiment repetitions.
+                    format: int32
+                    type: integer
+                type: object
+              executionMode:
+                default: FullExperimentRun
+                description: Execution mode selects which phases of the experiment
+                  lifecycle to run.
+                enum:
+                - FullExperimentRun
+                - ExperimentRun
+                - LoadTest
+                - SystemDeployer
+                type: string
+              manifests:
+                description: References to ConfigMaps containing Kubernetes manifests.
+                properties:
+                  chaos:
+                    description: Chaos injection manifests.
+                    properties:
+                      configMapRef:
+                        description: Reference to a ConfigMap containing Kubernetes
+                          manifests.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - configMapRef
+                    type: object
+                  infra:
+                    description: Infrastructure constraint manifests.
+                    properties:
+                      configMapRef:
+                        description: Reference to a ConfigMap containing Kubernetes
+                          manifests.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - configMapRef
+                    type: object
+                  load:
+                    description: Load generator manifests.
+                    properties:
+                      configMapRef:
+                        description: Reference to a ConfigMap containing Kubernetes
+                          manifests.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - configMapRef
+                    type: object
+                  monitor:
+                    description: Monitoring manifests (ServiceMonitor, PodMonitor,
+                      etc.).
+                    properties:
+                      configMapRef:
+                        description: Reference to a ConfigMap containing Kubernetes
+                          manifests.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - configMapRef
+                    type: object
+                  sut:
+                    description: System under test manifests.
+                    properties:
+                      configMapRef:
+                        description: Reference to a ConfigMap containing Kubernetes
+                          manifests.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    required:
+                    - configMapRef
+                    type: object
+                type: object
+              prometheus:
+                description: Prometheus connection configuration.
+                properties:
+                  queryTimeoutSeconds:
+                    default: 10
+                    description: Query timeout in seconds.
+                    format: int32
+                    type: integer
+                  url:
+                    description: Prometheus server URL.
+                    type: string
+                required:
+                - url
+                type: object
+              slos:
+                description: Service Level Objective definitions.
+                items:
+                  properties:
+                    description:
+                      description: Description of what this SLO measures.
+                      type: string
+                    displayName:
+                      description: Human-readable display name.
+                      type: string
+                    isBiggerBetter:
+                      default: false
+                      description: Whether higher values are better for this metric.
+                      type: boolean
+                    name:
+                      description: Unique name for this SLO.
+                      type: string
+                    query:
+                      description: PromQL query returning a single numeric SLI value.
+                      type: string
+                    threshold:
+                      description: Threshold value for the SLO.
+                      type: number
+                    thresholdDirection:
+                      default: LessThanOrEqual
+                      description: Comparison direction for the threshold.
+                      enum:
+                      - LessThan
+                      - LessThanOrEqual
+                      - GreaterThan
+                      - GreaterThanOrEqual
+                      type: string
+                    weight:
+                      default: 0
+                      description: Weight for the aggregate score (0.0 = observing
+                        only). Weights should sum to 1.0.
+                      maximum: 1
+                      minimum: 0
+                      type: number
+                  required:
+                  - isBiggerBetter
+                  - name
+                  - query
+                  - threshold
+                  - weight
+                  type: object
+                minItems: 1
+                type: array
+              topologyRef:
+                description: |-
+                  Reference to a Topology object (same namespace) that defines the edge zones
+                  for this experiment. If set, the experiment waits for the Topology to reach
+                  phase Applied before deploying the SUT. The Topology lifecycle is independent
+                  of the experiment — it is not deleted on cleanup.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+            required:
+            - executionMode
+            - prometheus
+            - slos
+            type: object
+          status:
+            description: ExperimentStatus defines the observed state of Experiment.
+            properties:
+              aggregateScore:
+                description: Weighted aggregate score over all completed repetitions.
+                type: number
+              completionTime:
+                description: Timestamp when the experiment completed.
+                format: date-time
+                type: string
+              conditions:
+                description: Standard conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              currentRepetition:
+                description: Index of the currently running repetition (1-based).
+                format: int32
+                type: integer
+              experimentId:
+                description: Random 5-character experiment identifier.
+                type: string
+              manifestConfigMaps:
+                description: Names of ConfigMaps created by the operator for manifest
+                  content.
+                items:
+                  type: string
+                type: array
+              phase:
+                description: Current phase of the experiment.
+                enum:
+                - Pending
+                - Running
+                - Succeeded
+                - Failed
+                - Cancelled
+                type: string
+              repetitionResults:
+                description: Per-repetition results.
+                items:
+                  properties:
+                    aggregateScore:
+                      description: Weighted aggregate score for this repetition.
+                      type: number
+                    repetition:
+                      description: Repetition index (1-based).
+                      format: int32
+                      type: integer
+                    sloResults:
+                      description: Per-SLO results for this repetition.
+                      items:
+                        properties:
+                          evaluations:
+                            description: Total number of SLO evaluations.
+                            format: int32
+                            type: integer
+                          maxSli:
+                            description: Maximum SLI value observed.
+                            type: number
+                          meanSli:
+                            description: Mean SLI value over all evaluations.
+                            type: number
+                          minSli:
+                            description: Minimum SLI value observed.
+                            type: number
+                          name:
+                            description: SLO name (matches SLOConfig.Name).
+                            type: string
+                          violationScore:
+                            description: Normalized violation score [0, 1].
+                            type: number
+                          violations:
+                            description: Number of threshold violations.
+                            format: int32
+                            type: integer
+                        required:
+                        - evaluations
+                        - meanSli
+                        - name
+                        - violationScore
+                        type: object
+                      type: array
+                  required:
+                  - aggregateScore
+                  - repetition
+                  - sloResults
+                  type: object
+                type: array
+              repetitionsCompleted:
+                description: Number of successfully completed repetitions.
+                format: int32
+                type: integer
+              sloResults:
+                description: Per-SLO results for the latest completed repetition.
+                items:
+                  properties:
+                    evaluations:
+                      description: Total number of SLO evaluations.
+                      format: int32
+                      type: integer
+                    maxSli:
+                      description: Maximum SLI value observed.
+                      type: number
+                    meanSli:
+                      description: Mean SLI value over all evaluations.
+                      type: number
+                    minSli:
+                      description: Minimum SLI value observed.
+                      type: number
+                    name:
+                      description: SLO name (matches SLOConfig.Name).
+                      type: string
+                    violationScore:
+                      description: Normalized violation score [0, 1].
+                      type: number
+                    violations:
+                      description: Number of threshold violations.
+                      format: int32
+                      type: integer
+                  required:
+                  - evaluations
+                  - meanSli
+                  - name
+                  - violationScore
+                  type: object
+                type: array
+              startTime:
+                description: Timestamp when the experiment started.
+                format: date-time
+                type: string
+              topologyRef:
+                description: Name of the Topology used in this experiment run (set
+                  if topologyRef was provided).
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

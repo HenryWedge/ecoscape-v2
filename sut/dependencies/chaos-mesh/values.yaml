@@ -1,0 +1,37 @@
+# chaos-mesh — minimales Setup für Minikube
+# Kein Dashboard, containerd Runtime (Minikube Standard), minimale Ressourcen
+
+# Minikube nutzt containerd als Container-Runtime
+chaosDaemon:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Controller
+controllerManager:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# Dashboard deaktivieren (spart ~100Mi RAM)
+dashboard:
+  enabled: false
+
+# DNS Server für DNSChaos
+dnsServer:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi

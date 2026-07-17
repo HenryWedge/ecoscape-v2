@@ -1,0 +1,94 @@
+# kube-prometheus-stack — minimales Setup für Minikube
+# Kein Grafana, kein Alertmanager, emptyDir Storage, 1s Scrape-Interval
+
+grafana:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+# ── Prometheus ─────────────────────────────────────────────────────────────
+prometheus:
+  prometheusSpec:
+    # 1 Scrape pro Sekunde (wie gewünscht)
+    scrapeInterval: "1s"
+    evaluationInterval: "1s"
+
+    retention: 24h
+
+    # Kein PVC nötig in Minikube
+    storageSpec:
+      emptyDir: {}
+
+    # ServiceMonitors aus ALLEN Namespaces scrapen (zone-berlin, zone-munich, aggregator, ...)
+    serviceMonitorNamespaceSelector: {}
+    serviceMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    podMonitorSelector: {}
+
+    # Pods mit prometheus.io/scrape: "true" Annotation direkt scrapen
+    additionalScrapeConfigs:
+      - job_name: "kubernetes-pods"
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: "([^:]+)(?::\\d+)?;(\\d+)"
+            replacement: "$1:$2"
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: pod
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 400Mi
+      limits:
+        cpu: 500m
+        memory: 800Mi
+
+    replicas: 1
+
+# ── Prometheus Operator ────────────────────────────────────────────────────
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# ── kube-state-metrics ────────────────────────────────────────────────────
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# ── node-exporter ─────────────────────────────────────────────────────────
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi

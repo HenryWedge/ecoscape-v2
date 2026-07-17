@@ -1,0 +1,55 @@
+# ChaosPhase — Ressourcen-Stress Munich (thermisches Throttling)
+#
+# Szenario: Das Munich-IoT-Gerät (Raspberry Pi 3-Klasse) gerät unter thermischen
+# Stress — simuliert durch CPU- und Memory-Auslastung.
+# Der Munich-Producer schreibt langsamer, der lokale Redis-Stream füllt sich.
+#
+# Typed faults:
+#   - CPUStress:    2 Worker à 80% → simuliert Hintergrundlast / Throttling
+#   - MemoryStress: 1 Worker, 128MiB → simuliert Speicherdruck
+#
+# Custom fault (Escape-Hatch):
+#   - DNSChaos: DNS-Auflösung schlägt in Munich fehl — zeigt wie ein nicht-typisierter
+#     Chaos-Mesh-Typ eingebunden werden kann. metadata.namespace muss explizit gesetzt sein.
+#
+# Erwartete Effekte:
+#   - Producer-Write-Rate für Munich sinkt (CPU-Throttling)
+#   - stream-lag Munich steigt
+#   - DNS-Fehler können Verbindungsaufbau verzögern (abhängig vom SUT)
+#
+# Einsatz: spec.chaosPhaseRef.name: esp-stress-munich
+apiVersion: ecoscape.cau-se.de/v1alpha1
+kind: ChaosPhase
+metadata:
+  name: esp-stress-munich
+  namespace: default
+spec:
+  topologyRef:
+    name: two-zone-edge
+  faults:
+    - type: CPUStress
+      zones: [munich]
+      workers: 2
+      load: 80
+
+    - type: MemoryStress
+      zones: [munich]
+      workers: 1
+      size: "128MiB"
+
+    # Escape-Hatch: DNSChaos ist kein typisierter Fault-Typ — wird as-is an Chaos Mesh übergeben.
+    # metadata.namespace muss explizit gesetzt sein.
+    - type: Custom
+      manifest: |
+        apiVersion: chaos-mesh.org/v1alpha1
+        kind: DNSChaos
+        metadata:
+          name: munich-dns-error
+          namespace: two-zone-edge-munich
+        spec:
+          action: error
+          mode: all
+          selector:
+            namespaces:
+              - two-zone-edge-munich
+          duration: "60s"

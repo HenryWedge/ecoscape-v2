@@ -1,0 +1,22 @@
+# ChaosPhase — Netzwerk-Partition Berlin
+#
+# Szenario: Zone Berlin verliert die Verbindung zur Cloud vollständig.
+# Der Aggregator kann den Berliner Redis-Stream nicht mehr erreichen.
+#
+# Erwartete Effekte:
+#   - aggregator_stream_lag{zone="berlin"} steigt kontinuierlich
+#   - aggregator_zone_offline_seconds_total{zone="berlin"} akkumuliert
+#   - Sensor-Throughput bricht um ~1/3 ein (Berlin-Producer schreibt weiter lokal)
+#
+# Einsatz: spec.chaosPhaseRef.name: esp-network-partition-berlin
+apiVersion: ecoscape.cau-se.de/v1alpha1
+kind: ChaosPhase
+metadata:
+  name: esp-network-partition-berlin
+  namespace: default
+spec:
+  topologyRef:
+    name: two-zone-edge
+  faults:
+    - type: NetworkPartition
+      zones: [berlin, cloud]

@@ -295,6 +295,7 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 		experiment.Status.CurrentRepetition = repetition
 
 		var ownedConfigMaps []string
+		var chaosRefs []string
 		collectors := makeCollectors(experiment.Spec.SLOs)
 		prometheusClient := newPrometheusClient(experiment.Spec.Prometheus.URL,
 			derefOr(experiment.Spec.Prometheus.QueryTimeoutSeconds, 10))
@@ -338,13 +339,23 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 			return err
 		}
 
-		if reconciler.isModeApplyChaos(experiment) {
-			if err := reconciler.applyManifestSet(ctx, namespace, experiment.Spec.Manifests.Chaos, experimentID, "chaos", &ownedConfigMaps); err != nil {
+		if reconciler.isModeApplyChaos(experiment) && experiment.Spec.ChaosPhaseRef != nil {
+			cp := &experimentv1alpha1.ChaosPhase{}
+			if err := reconciler.Get(ctx, types.NamespacedName{
+				Namespace: namespace,
+				Name:      experiment.Spec.ChaosPhaseRef.Name,
+			}, cp); err != nil {
+				reconciler.cleanupChaosPhase(ctx, chaosRefs)
 				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
-				return err
+				return fmt.Errorf("get ChaosPhase %q: %w", experiment.Spec.ChaosPhaseRef.Name, err)
 			}
-			experiment.Status.ManifestConfigMaps = ownedConfigMaps
-			_ = reconciler.Status().Update(ctx, experiment)
+			refs, err := reconciler.applyChaosPhase(ctx, cp, experimentID)
+			if err != nil {
+				reconciler.cleanupChaosPhase(ctx, refs)
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return fmt.Errorf("apply chaos phase: %w", err)
+			}
+			chaosRefs = refs
 		}
 
 		logger.Info("chaos evaluation", "seconds", measurementDuration)
@@ -357,6 +368,7 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 		allRepetitionResults = append(allRepetitionResults, repetitionResult)
 		latestSloResults = repetitionResult.SloResults
 
+		reconciler.cleanupChaosPhase(ctx, chaosRefs)
 		reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
 
 		experiment.Status.RepetitionsCompleted = repetition

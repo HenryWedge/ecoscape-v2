@@ -63,9 +63,6 @@ type ManifestsConfig struct {
 	// Infrastructure constraint manifests.
 	// +optional
 	Infra *ManifestRef `json:"infra,omitempty"`
-	// Chaos injection manifests.
-	// +optional
-	Chaos *ManifestRef `json:"chaos,omitempty"`
 	// Monitoring manifests (ServiceMonitor, PodMonitor, etc.).
 	// +optional
 	Monitor *ManifestRef `json:"monitor,omitempty"`
@@ -126,6 +123,11 @@ type ExperimentSpec struct {
 	// of the experiment — it is not deleted on cleanup.
 	// +optional
 	TopologyRef *corev1.LocalObjectReference `json:"topologyRef,omitempty"`
+	// Reference to a ChaosPhase object (same namespace) defining the faults to
+	// inject during the chaos measurement window. The ChaosPhase lifecycle is
+	// independent of the experiment — it is not deleted on cleanup.
+	// +optional
+	ChaosPhaseRef *corev1.LocalObjectReference `json:"chaosPhaseRef,omitempty"`
 	// Prometheus connection configuration.
 	Prometheus PrometheusConfig `json:"prometheus"`
 	// Service Level Objective definitions.

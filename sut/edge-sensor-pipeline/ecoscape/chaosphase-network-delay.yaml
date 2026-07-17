@@ -1,0 +1,29 @@
+# ChaosPhase — Netzwerk-Degradierung Munich (LTE unter Last)
+#
+# Szenario: Die Verbindung zwischen Munich und Cloud verschlechtert sich stark —
+# simuliert LTE-Überlastung auf einem mobilen IoT-Gerät.
+# Kombiniert zusätzliche Latenz + Paketverlust on top der Topology-Basisbedingungen
+# (Topology: 150ms/30ms Jitter/5Mbps/10% Loss → ChaosPhase addiert obendrauf).
+#
+# Erwartete Effekte:
+#   - aggregator_stream_lag{zone="munich"} steigt graduell (stale Daten)
+#   - Nachrichten kommen verspätet und teilweise nicht an
+#   - sensor-throughput für Munich-Producer sinkt messbar
+#
+# Einsatz: spec.chaosPhaseRef.name: esp-network-degraded-munich
+apiVersion: ecoscape.cau-se.de/v1alpha1
+kind: ChaosPhase
+metadata:
+  name: esp-network-degraded-munich
+  namespace: default
+spec:
+  topologyRef:
+    name: two-zone-edge
+  faults:
+    - type: NetworkDelay
+      zones: [munich, cloud]
+      latency: "200ms"
+      jitter: "50ms"
+    - type: NetworkLoss
+      zones: [munich, cloud]
+      packetLoss: "15"

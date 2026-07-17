@@ -139,7 +139,7 @@ data:
         - name: metrics
           port: 9121
           targetPort: 9121
-    ---
+  03a-redis-exporter-berlin.yaml: |
     apiVersion: apps/v1
     kind: Deployment
     metadata:
@@ -169,6 +169,8 @@ data:
               env:
                 - name: REDIS_ADDR
                   value: "redis://redis.zone-berlin.svc:6379"
+                - name: REDIS_EXPORTER_CHECK_STREAMS
+                  value: sensor-data  
               ports:
                 - containerPort: 9121
               resources:
@@ -191,12 +193,12 @@ data:
     spec:
       selector:
         app: redis-exporter
-        zone: munich
+        zone: munich  
       ports:
         - name: metrics
           port: 9121
           targetPort: 9121
-    ---
+  04a-redis-exporter-munich.yaml: |
     apiVersion: apps/v1
     kind: Deployment
     metadata:
@@ -226,6 +228,8 @@ data:
               env:
                 - name: REDIS_ADDR
                   value: "redis://redis.zone-munich.svc:6379"
+                - name: REDIS_EXPORTER_CHECK_STREAMS
+                  value: sensor-data  
               ports:
                 - containerPort: 9121
               resources:

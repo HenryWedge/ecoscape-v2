@@ -86,7 +86,7 @@ data:
                 - name: ZONE
                   value: "munich"
                 - name: REDIS_HOST
-                  value: "redis.zone-munich.svc:"
+                  value: "redis.zone-munich.svc"
                 - name: REDIS_PORT
                   value: "6379"
                 - name: INTERVAL_MS

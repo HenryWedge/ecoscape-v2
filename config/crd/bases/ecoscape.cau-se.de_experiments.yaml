@@ -49,6 +49,23 @@ spec:
           spec:
             description: ExperimentSpec defines the desired state of Experiment.
             properties:
+              chaosPhaseRef:
+                description: |-
+                  Reference to a ChaosPhase object (same namespace) defining the faults to
+                  inject during the chaos measurement window. The ChaosPhase lifecycle is
+                  independent of the experiment — it is not deleted on cleanup.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               duration:
                 description: Timing configuration for experiment phases.
                 properties:
@@ -92,27 +109,6 @@ spec:
               manifests:
                 description: References to ConfigMaps containing Kubernetes manifests.
                 properties:
-                  chaos:
-                    description: Chaos injection manifests.
-                    properties:
-                      configMapRef:
-                        description: Reference to a ConfigMap containing Kubernetes
-                          manifests.
-                        properties:
-                          name:
-                            default: ""
-                            description: |-
-                              Name of the referent.
-                              This field is effectively required, but due to backwards compatibility is
-                              allowed to be empty. Instances of this type with an empty value here are
-                              almost certainly wrong.
-                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                            type: string
-                        type: object
-                        x-kubernetes-map-type: atomic
-                    required:
-                    - configMapRef
-                    type: object
                   infra:
                     description: Infrastructure constraint manifests.
                     properties:

@@ -66,7 +66,6 @@ var manifestRoles = []manifestRole{
 	{dirName: "sut", roleKey: "sut"},
 	{dirName: "load", roleKey: "load"},
 	{dirName: "infra", roleKey: "infra"},
-	{dirName: "chaos", roleKey: "chaos"},
 	{dirName: "monitor", roleKey: "monitor"},
 }
 
@@ -211,6 +210,8 @@ spec:
     pauseBetweenRepetitions: 60
   manifests:
 %s
+  # chaosPhaseRef:
+  #   name: my-chaos-phase   # reference a ChaosPhase CR (kubectl ecoscape bundle is not used for chaos)
   prometheus:
     url: http://prometheus-k8s.monitoring:9090
   slos:

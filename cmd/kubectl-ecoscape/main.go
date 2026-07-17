@@ -19,6 +19,7 @@ func main() {
 
 	root.AddCommand(
 		newInitCommand(),
+		newBundleCommand(),
 		newRunCommand(),
 		newResultsCommand(),
 		newListCommand(),

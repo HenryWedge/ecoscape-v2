@@ -163,6 +163,14 @@ build: manifests generate fmt vet ## Build manager binary.
 build-plugin: fmt vet ## Build kubectl plugin binary.
 	go build -o bin/kubectl-ecoscape ./cmd/kubectl-ecoscape/
 
+PLUGIN_INSTALL_DIR ?= $(HOME)/.local/bin
+
+.PHONY: update-plugin
+update-plugin: build-plugin ## Build and install kubectl plugin to $(HOME)/.local/bin.
+	@mkdir -p $(PLUGIN_INSTALL_DIR)
+	cp bin/kubectl-ecoscape $(PLUGIN_INSTALL_DIR)/kubectl-ecoscape
+	@echo "Installed kubectl-ecoscape to $(PLUGIN_INSTALL_DIR)/kubectl-ecoscape"
+
 .PHONY: completion
 completion: build-plugin ## Generate shell completion scripts.
 	@mkdir -p completions

@@ -31,7 +31,7 @@ data:
     kind: ServiceMonitor
     metadata:
       name: redis-exporter-berlin
-      namespace: zone-berlin
+      namespace: two-zone-edge-berlin
       labels:
         app: redis-exporter
         zone: berlin
@@ -53,7 +53,7 @@ data:
     kind: ServiceMonitor
     metadata:
       name: redis-exporter-munich
-      namespace: zone-munich
+      namespace: two-zone-edge-munich
       labels:
         app: redis-exporter
         zone: munich

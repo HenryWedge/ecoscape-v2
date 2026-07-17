@@ -16,12 +16,12 @@ spec:
       interval: 5s
       path: /metrics
 ---
-# ServiceMonitor for redis-exporter in zone-berlin
+# ServiceMonitor for redis-exporter in two-zone-edge-berlin
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: redis-exporter-berlin
-  namespace: zone-berlin
+  namespace: two-zone-edge-berlin
   labels:
     app: redis-exporter
     zone: berlin
@@ -38,12 +38,12 @@ spec:
         - targetLabel: zone
           replacement: berlin
 ---
-# ServiceMonitor for redis-exporter in zone-munich
+# ServiceMonitor for redis-exporter in two-zone-edge-berlin
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: redis-exporter-munich
-  namespace: zone-munich
+  namespace: two-zone-edge-berlin
   labels:
     app: redis-exporter
     zone: munich

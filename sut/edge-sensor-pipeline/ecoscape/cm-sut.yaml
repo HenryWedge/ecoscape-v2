@@ -15,7 +15,7 @@ data:
     kind: Service
     metadata:
       name: redis
-      namespace: zone-berlin
+      namespace: two-zone-edge-berlin
       labels:
         app: redis
         zone: berlin
@@ -32,7 +32,7 @@ data:
     kind: Deployment
     metadata:
       name: redis
-      namespace: zone-berlin
+      namespace: two-zone-edge-berlin
       labels:
         app: redis
         zone: berlin
@@ -70,7 +70,7 @@ data:
     kind: Service
     metadata:
       name: redis
-      namespace: zone-munich
+      namespace: two-zone-edge-munich
       labels:
         app: redis
         zone: munich
@@ -87,7 +87,7 @@ data:
     kind: Deployment
     metadata:
       name: redis
-      namespace: zone-munich
+      namespace: two-zone-edge-munich
       labels:
         app: redis
         zone: munich
@@ -127,7 +127,7 @@ data:
     kind: Service
     metadata:
       name: redis-exporter
-      namespace: zone-berlin
+      namespace: two-zone-edge-berlin
       labels:
         app: redis-exporter
         zone: berlin
@@ -144,7 +144,7 @@ data:
     kind: Deployment
     metadata:
       name: redis-exporter
-      namespace: zone-berlin
+      namespace: two-zone-edge-berlin
       labels:
         app: redis-exporter
         zone: berlin
@@ -168,7 +168,7 @@ data:
               image: oliver006/redis_exporter:v1.62.0-alpine
               env:
                 - name: REDIS_ADDR
-                  value: "redis://redis.zone-berlin.svc:6379"
+                  value: "redis://redis.two-zone-edge-berlin.svc:6379"
                 - name: REDIS_EXPORTER_CHECK_STREAMS
                   value: sensor-data  
               ports:
@@ -186,7 +186,7 @@ data:
     kind: Service
     metadata:
       name: redis-exporter
-      namespace: zone-munich
+      namespace: two-zone-edge-munich
       labels:
         app: redis-exporter
         zone: munich
@@ -203,7 +203,7 @@ data:
     kind: Deployment
     metadata:
       name: redis-exporter
-      namespace: zone-munich
+      namespace: two-zone-edge-munich
       labels:
         app: redis-exporter
         zone: munich
@@ -227,7 +227,7 @@ data:
               image: oliver006/redis_exporter:v1.62.0-alpine
               env:
                 - name: REDIS_ADDR
-                  value: "redis://redis.zone-munich.svc:6379"
+                  value: "redis://redis.two-zone-edge-munich.svc:6379"
                 - name: REDIS_EXPORTER_CHECK_STREAMS
                   value: sensor-data  
               ports:
@@ -261,7 +261,7 @@ data:
     kind: Deployment
     metadata:
       name: aggregator
-      namespace: aggregator
+      namespace: two-zone-edge-cloud
       labels:
         app: aggregator
     spec:
@@ -284,7 +284,7 @@ data:
               imagePullPolicy: IfNotPresent
               env:
                 - name: ZONES
-                  value: "berlin:redis.zone-berlin.svc:6379,munich:redis.zone-munich.svc:6379"
+                  value: "berlin:redis.two-zone-edge-berlin.svc:6379,munich:redis.two-zone-edge-munich.svc:6379"
                 - name: STREAM_NAME
                   value: "sensor-data"
                 - name: CONSUMER_GROUP

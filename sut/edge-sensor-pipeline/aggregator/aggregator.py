@@ -7,10 +7,9 @@ Metrics exported:
   aggregator_messages_consumed_total{zone} — total messages successfully read
   aggregator_zone_offline_seconds_total{zone} — cumulative seconds the zone was
                                                  considered offline (no data)
-  aggregator_stream_lag{zone}            — locally computed lag
-                                           (messages produced - consumed),
-                                           derived from stream length reported
-                                           by Redis XLEN vs consumed counter
+  aggregator_stream_lag{zone}            — consumer group lag: number of messages
+                                           in the stream not yet delivered to the
+                                           consumer group (via XINFO GROUPS, Redis 7+)
 """
 import logging
 import os
@@ -57,6 +56,7 @@ INTERVAL_MS = int(os.environ.get("INTERVAL_MS", "500"))
 OFFLINE_TIMEOUT_S = float(os.environ.get("OFFLINE_TIMEOUT_S", "5"))
 METRICS_PORT = int(os.environ.get("METRICS_PORT", "8000"))
 READ_COUNT = int(os.environ.get("READ_COUNT", "10"))  # messages per XREADGROUP call
+LOG_INTERVAL_S = float(os.environ.get("LOG_INTERVAL_S", "5"))  # avg log frequency
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics
@@ -95,6 +95,7 @@ class ZoneWorker:
         self.window: deque[float] = deque(maxlen=WINDOW)
         self.last_message_time: float = time.monotonic()
         self.consumed: int = 0
+        self._last_log_time: float = 0.0  # force log on first poll
 
         # Pre-initialise label combinations so Prometheus shows them from start
         zone_avg.labels(zone=zone).set(0)
@@ -152,10 +153,27 @@ class ZoneWorker:
             avg = sum(self.window) / len(self.window)
             zone_avg.labels(zone=self.zone).set(avg)
 
+            now = time.monotonic()
+            if now - self._last_log_time >= LOG_INTERVAL_S:
+                log.info(
+                    "[%s] avg=%.4f (window=%d/%d, consumed=%d)",
+                    self.zone, avg, len(self.window), WINDOW, self.consumed,
+                )
+                self._last_log_time = now
+
     def _update_lag(self) -> None:
         try:
-            length = self.client.xlen(STREAM_NAME)
-            stream_lag.labels(zone=self.zone).set(length)
+            groups = self.client.xinfo_groups(STREAM_NAME)
+            for g in groups:
+                if g["name"] == CONSUMER_GROUP:
+                    # Redis 7.0+ exposes lag directly in XINFO GROUPS.
+                    # lag = messages in the stream after last-delivered-id,
+                    # i.e. not yet delivered to this consumer group.
+                    lag = g.get("lag", 0) or 0
+                    stream_lag.labels(zone=self.zone).set(lag)
+                    return
+            # Consumer group not found yet — lag unknown, report 0
+            stream_lag.labels(zone=self.zone).set(0)
         except Exception:
             pass
 

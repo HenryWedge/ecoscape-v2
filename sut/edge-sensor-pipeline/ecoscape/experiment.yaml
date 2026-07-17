@@ -46,12 +46,12 @@ spec:
   # Chaos Mesh Objekte werden beim Cleanup der Repetition automatisch gelöscht.
   # Szenario wechseln: Namen oben in den Kommentaren nachschlagen.
   chaosPhaseRef:
-    name: esp-network-partition-berlin
+    name: esp-network-degraded-munich
 
   duration:
     loadDelay: 10
     chaosDelay: 10
-    measurementDuration: 300
+    measurementDuration: 60
     repetitions: 1
     pauseBetweenRepetitions: 0
 
@@ -72,13 +72,13 @@ spec:
 
   slos:
     - name: stream-lag-berlin
-      query: 'aggregator_stream_lag{namespace="two-zone-edge-berlin"}'
+      query: 'aggregator_stream_lag{zone="berlin"}'
       threshold: 50
       isBiggerBetter: false
       weight: 0.35
 
     - name: stream-lag-munich
-      query: 'aggregator_stream_lag{namespace="two-zone-edge-munich"}'
+      query: 'aggregator_stream_lag{zone="munich"}'
       threshold: 50
       isBiggerBetter: false
       weight: 0.35

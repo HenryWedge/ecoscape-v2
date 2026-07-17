@@ -12,7 +12,7 @@ data:
     kind: Deployment
     metadata:
       name: producer
-      namespace: zone-berlin
+      namespace: two-zone-edge-berlin
       labels:
         app: producer
         zone: berlin
@@ -36,11 +36,11 @@ data:
                 - name: ZONE
                   value: "berlin"
                 - name: REDIS_HOST
-                  value: "redis.zone-berlin.svc"
+                  value: "redis.two-zone-edge-berlin.svc"
                 - name: REDIS_PORT
                   value: "6379"
                 - name: INTERVAL_MS
-                  value: "500"
+                  value: "50"
                 - name: VALUE_BASE
                   value: "20.0"
                 - name: VALUE_DRIFT
@@ -62,7 +62,7 @@ data:
     kind: Deployment
     metadata:
       name: producer
-      namespace: zone-munich
+      namespace: two-zone-edge-munich
       labels:
         app: producer
         zone: munich
@@ -86,11 +86,11 @@ data:
                 - name: ZONE
                   value: "munich"
                 - name: REDIS_HOST
-                  value: "redis.zone-munich.svc"
+                  value: "redis.two-zone-edge-munich.svc"
                 - name: REDIS_PORT
                   value: "6379"
                 - name: INTERVAL_MS
-                  value: "500"
+                  value: "50"
                 - name: VALUE_BASE
                   value: "22.0"
                 - name: VALUE_DRIFT

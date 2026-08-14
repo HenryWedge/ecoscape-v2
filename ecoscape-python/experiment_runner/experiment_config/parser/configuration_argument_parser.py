@@ -5,11 +5,11 @@ class ConfigurationArgumentParser:
 
     def __init__(self):
         self.argument_parser = ArgumentParser(description="Ecoscape")
-        self.argument_parser.add_argument("--duration", type=int, help="experiment duration")
+        self.argument_parser.add_argument("--duration", type=int, help="experiment3 duration")
         self.argument_parser.add_argument("--load_delay", type=int, nargs='?', help="delay until the load generator starts")
         self.argument_parser.add_argument("--eval_delay", type=int, nargs='?',
                                  help="delay until the evaluation of the slo starts")
-        self.argument_parser.add_argument("--repetitions", type=int, nargs='?', help="number of experiment runs")
+        self.argument_parser.add_argument("--repetitions", type=int, nargs='?', help="number of experiment3 runs")
 
         self.argument_parser.add_argument("--dir_load", type=str, default="load/base", nargs='?',
                                  help="directory of the load specification")

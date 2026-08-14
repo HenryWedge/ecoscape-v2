@@ -22,8 +22,8 @@ spec:
   faults:
     - type: NetworkDelay
       zones: [munich, cloud]
-      latency: "200ms"
-      jitter: "50ms"
+      latency: "500ms"
+      jitter: "100ms"
     - type: NetworkLoss
       zones: [munich, cloud]
-      packetLoss: "15"
+      packetLoss: "50"

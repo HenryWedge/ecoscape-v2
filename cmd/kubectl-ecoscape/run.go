@@ -24,21 +24,21 @@ type runOptions struct {
 func newRunCommand() *cobra.Command {
 	opts := &runOptions{}
 	cmd := &cobra.Command{
-		Use:   "run -f experiment.yaml",
-		Short: "Create and optionally wait for an experiment to complete",
+		Use:   "run -f experiment3.yaml",
+		Short: "Create and optionally wait for an experiment3 to complete",
 		Long: `Creates an Experiment custom resource and optionally waits for it
 to finish, showing progress along the way.
 
 Examples:
-  kubectl ecoscape run -f experiment.yaml
-  kubectl ecoscape run -f experiment.yaml --wait --timeout 10m
+  kubectl ecoscape run -f experiment3.yaml
+  kubectl ecoscape run -f experiment3.yaml --wait --timeout 10m
 `,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.filename == "" && len(args) > 0 {
 				opts.filename = args[0]
 			}
 			if opts.filename == "" {
-				return fmt.Errorf("specify experiment file with -f <file>")
+				return fmt.Errorf("specify experiment3 file with -f <file>")
 			}
 			return runRun(cmd, opts)
 		},
@@ -47,7 +47,7 @@ Examples:
 	cmd.Flags().StringVarP(&opts.filename, "filename", "f", "", "Experiment YAML file")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "default", "Target namespace")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "Path to kubeconfig")
-	cmd.Flags().BoolVarP(&opts.wait, "wait", "w", false, "Wait for experiment to complete")
+	cmd.Flags().BoolVarP(&opts.wait, "wait", "w", false, "Wait for experiment3 to complete")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 30*time.Minute, "Maximum time to wait")
 
 	return cmd
@@ -78,19 +78,19 @@ func runRun(cmd *cobra.Command, opts *runOptions) error {
 	existing := &experimentv1alpha1.Experiment{}
 	if err := clients.runtimeClient.Get(cmd.Context(),
 		types.NamespacedName{Namespace: ns, Name: name}, existing); err == nil {
-		return fmt.Errorf("experiment %s/%s already exists (phase: %s)", ns, name, existing.Status.Phase)
+		return fmt.Errorf("experiment3 %s/%s already exists (phase: %s)", ns, name, existing.Status.Phase)
 	}
 
 	if err := clients.runtimeClient.Create(cmd.Context(), experiment); err != nil {
-		return fmt.Errorf("create experiment: %w", err)
+		return fmt.Errorf("create experiment3: %w", err)
 	}
-	fmt.Printf("Created experiment %s/%s (id: %s)\n", ns, name, experiment.Status.ExperimentID)
+	fmt.Printf("Created experiment3 %s/%s (id: %s)\n", ns, name, experiment.Status.ExperimentID)
 
 	if !opts.wait {
 		return nil
 	}
 
-	fmt.Println("Waiting for experiment to complete...")
+	fmt.Println("Waiting for experiment3 to complete...")
 	ctx, cancel := context.WithTimeout(cmd.Context(), opts.timeout)
 	defer cancel()
 
@@ -108,7 +108,7 @@ func runRun(cmd *cobra.Command, opts *runOptions) error {
 			current := &experimentv1alpha1.Experiment{}
 			if err := clients.runtimeClient.Get(ctx,
 				types.NamespacedName{Namespace: ns, Name: name}, current); err != nil {
-				return fmt.Errorf("get experiment: %w", err)
+				return fmt.Errorf("get experiment3: %w", err)
 			}
 
 			if current.Status.Phase != lastPhase {
@@ -138,7 +138,7 @@ func runRun(cmd *cobra.Command, opts *runOptions) error {
 				if message != "" {
 					fmt.Printf("   Reason: %s\n", message)
 				}
-				return fmt.Errorf("experiment failed: %s", message)
+				return fmt.Errorf("experiment3 failed: %s", message)
 			}
 		}
 	}

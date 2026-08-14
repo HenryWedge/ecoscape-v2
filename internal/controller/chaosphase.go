@@ -115,11 +115,17 @@ func (r *ExperimentReconciler) applyNetworkFault(
 		"direction": "both",
 		"selector": map[string]interface{}{
 			"namespaces": []interface{}{nsA},
+			"labelSelectors": map[string]interface{}{
+				"ecoscape": "true",
+			},
 		},
 		"target": map[string]interface{}{
 			"mode": "all",
 			"selector": map[string]interface{}{
 				"namespaces": []interface{}{nsB},
+				"labelSelectors": map[string]interface{}{
+					"ecoscape": "true",
+				},
 			},
 		},
 	}
@@ -157,6 +163,9 @@ func (r *ExperimentReconciler) applyStressFault(
 			"mode": "all",
 			"selector": map[string]interface{}{
 				"namespaces": []interface{}{ns},
+				"labelSelectors": map[string]interface{}{
+					"ecoscape": "true",
+				},
 			},
 			"stressors": stressors,
 		}

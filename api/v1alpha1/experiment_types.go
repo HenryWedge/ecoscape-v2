@@ -32,13 +32,18 @@ type DurationConfig struct {
 	// Delay before full SLO evaluation starts (seconds).
 	// +optional
 	EvalDelay *int32 `json:"evalDelay,omitempty"`
+	// Stabilization delay after the Topology becomes Active (seconds).
+	// Use this to give SUT and load pods time to fully start up under the new
+	// network conditions before the pre-chaos evaluation window begins.
+	// +optional
+	TopologyDelay *int32 `json:"topologyDelay,omitempty"`
 	// Delay before chaos injection (seconds).
 	// +optional
 	ChaosDelay *int32 `json:"chaosDelay,omitempty"`
 	// Duration of the chaos evaluation phase (seconds).
 	// +optional
 	MeasurementDuration *int32 `json:"measurementDuration,omitempty"`
-	// Number of experiment repetitions.
+	// Number of experiment3 repetitions.
 	// +optional
 	// +kubebuilder:default=1
 	Repetitions int32 `json:"repetitions,omitempty"`
@@ -108,24 +113,24 @@ type SLOConfig struct {
 
 // ExperimentSpec defines the desired state of Experiment.
 type ExperimentSpec struct {
-	// Execution mode selects which phases of the experiment lifecycle to run.
+	// Execution mode selects which phases of the experiment3 lifecycle to run.
 	// +kubebuilder:default=FullExperimentRun
 	ExecutionMode ExecutionMode `json:"executionMode"`
-	// Timing configuration for experiment phases.
+	// Timing configuration for experiment3 phases.
 	// +optional
 	Duration DurationConfig `json:"duration,omitempty"`
 	// References to ConfigMaps containing Kubernetes manifests.
 	// +optional
 	Manifests ManifestsConfig `json:"manifests,omitempty"`
 	// Reference to a Topology object (same namespace) that defines the edge zones
-	// for this experiment. If set, the experiment waits for the Topology to reach
+	// for this experiment3. If set, the experiment3 waits for the Topology to reach
 	// phase Applied before deploying the SUT. The Topology lifecycle is independent
-	// of the experiment — it is not deleted on cleanup.
+	// of the experiment3 — it is not deleted on cleanup.
 	// +optional
 	TopologyRef *corev1.LocalObjectReference `json:"topologyRef,omitempty"`
 	// Reference to a ChaosPhase object (same namespace) defining the faults to
 	// inject during the chaos measurement window. The ChaosPhase lifecycle is
-	// independent of the experiment — it is not deleted on cleanup.
+	// independent of the experiment3 — it is not deleted on cleanup.
 	// +optional
 	ChaosPhaseRef *corev1.LocalObjectReference `json:"chaosPhaseRef,omitempty"`
 	// Prometheus connection configuration.
@@ -164,32 +169,33 @@ type RepetitionResult struct {
 	AggregateScore float64 `json:"aggregateScore"`
 }
 
-// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Cancelled
+// +kubebuilder:validation:Enum=Pending;WaitingForTopology;Running;Succeeded;Failed;Cancelled
 type ExperimentPhase string
 
 const (
-	PhasePending   ExperimentPhase = "Pending"
-	PhaseRunning   ExperimentPhase = "Running"
-	PhaseSucceeded ExperimentPhase = "Succeeded"
-	PhaseFailed    ExperimentPhase = "Failed"
-	PhaseCancelled ExperimentPhase = "Cancelled"
+	PhasePending            ExperimentPhase = "Pending"
+	PhaseWaitingForTopology ExperimentPhase = "WaitingForTopology"
+	PhaseRunning            ExperimentPhase = "Running"
+	PhaseSucceeded          ExperimentPhase = "Succeeded"
+	PhaseFailed             ExperimentPhase = "Failed"
+	PhaseCancelled          ExperimentPhase = "Cancelled"
 )
 
 // ExperimentStatus defines the observed state of Experiment.
 type ExperimentStatus struct {
-	// Current phase of the experiment.
+	// Current phase of the experiment3.
 	// +optional
 	Phase ExperimentPhase `json:"phase,omitempty"`
-	// Random 5-character experiment identifier.
+	// Random 5-character experiment3 identifier.
 	// +optional
 	ExperimentID string `json:"experimentId,omitempty"`
-	// Name of the Topology used in this experiment run (set if topologyRef was provided).
+	// Name of the Topology used in this experiment3 run (set if topologyRef was provided).
 	// +optional
 	TopologyRef string `json:"topologyRef,omitempty"`
-	// Timestamp when the experiment started.
+	// Timestamp when the experiment3 started.
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
-	// Timestamp when the experiment completed.
+	// Timestamp when the experiment3 completed.
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 	// Number of successfully completed repetitions.

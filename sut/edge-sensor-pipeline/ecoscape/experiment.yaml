@@ -1,34 +1,3 @@
----
-# experiment.yaml — Ecoscape Experiment CR for the Edge Sensor Pipeline SUT.
-#
-# Ablauf:
-#   0. Topology "two-zone-edge" muss Applied sein (der Controller wartet bis zu 5 min)
-#   1. SUT deployen (Redis + Aggregator in den Zonen-Namespaces)        ← cm-sut
-#   2. Lastgenerator starten (Producer in zone-berlin und zone-munich)  ← cm-load
-#   3. Monitoring deployen (ServiceMonitor für Aggregator)              ← cm-monitor
-#   4. 10 s warten bis die Pipeline stabil ist
-#   5. Baseline messen: 10 s pre-Chaos SLO-Evaluierung (1 s Takt)
-#   6. Chaos injizieren                                                 ← ChaosPhase
-#   7. 60 s Chaos-Phase messen (1 s Takt)
-#   8. SUT + Load + Chaos abräumen, RepetitionResult schreiben
-#   9. results-ConfigMap schreiben: ecoscape-<id>-results
-#
-# Topology-Integration:
-#   spec.topologyRef.name zeigt auf das Topology-Objekt im selben Namespace.
-#   Der Controller wartet, bis diese Topology Applied ist, bevor er das SUT deployt.
-#   Die Topology wird NICHT beim Cleanup gelöscht — sie lebt unabhängig.
-#
-# Chaos-Szenario wechseln (spec.chaosPhaseRef.name):
-#   esp-network-partition-berlin  → Berlin komplett offline      (chaosphase-network-partition.yaml)
-#   esp-network-degraded-munich   → LTE-Degradierung Munich      (chaosphase-network-delay.yaml)
-#   esp-stress-munich             → CPU/Memory-Stress Munich     (chaosphase-stress-munich.yaml)
-#
-# Voraussetzungen:
-#   1. Operator läuft:          make run
-#   2. Topology deployt:        kubectl apply -f ecoscape/topology.yaml
-#   3. ChaosPhase deployt:      kubectl apply -f ecoscape/chaosphase-network-partition.yaml
-#   4. ConfigMaps deployt:      kubectl apply -f ecoscape/cm-sut.yaml -f ecoscape/cm-load.yaml -f ecoscape/cm-monitor.yaml
-#   5. Prometheus erreichbar unter der URL in spec.prometheus.url
 apiVersion: ecoscape.cau-se.de/v1alpha1
 kind: Experiment
 metadata:
@@ -36,24 +5,18 @@ metadata:
   namespace: default
 spec:
   executionMode: FullExperimentRun
-
-  # Referenz auf die Topology, die Zonen-Namespaces + NetworkChaos anlegt.
-  # Der Controller wartet bis topology.status.phase == Applied (max. 5 min).
   topologyRef:
     name: two-zone-edge
-
-  # Referenz auf die ChaosPhase, die während des Messfensters injiziert wird.
-  # Chaos Mesh Objekte werden beim Cleanup der Repetition automatisch gelöscht.
-  # Szenario wechseln: Namen oben in den Kommentaren nachschlagen.
   chaosPhaseRef:
-    name: esp-network-degraded-munich
+    name: esp-stress-cloud
 
   duration:
-    loadDelay: 10
-    chaosDelay: 10
-    measurementDuration: 60
-    repetitions: 1
-    pauseBetweenRepetitions: 0
+    loadDelay: 30
+    chaosDelay: 30
+    topologyDelay: 15
+    measurementDuration: 90
+    repetitions: 3
+    pauseBetweenRepetitions: 90
 
   manifests:
     sut:
@@ -72,29 +35,13 @@ spec:
 
   slos:
     - name: stream-lag-berlin
-      query: 'aggregator_stream_lag{zone="berlin"}'
+      query: 'redis_stream_group_lag{zone="berlin"}'
       threshold: 50
       isBiggerBetter: false
-      weight: 0.35
+      weight: 0.5
 
     - name: stream-lag-munich
-      query: 'aggregator_stream_lag{zone="munich"}'
+      query: 'redis_stream_group_lag{zone="munich"}'
       threshold: 50
       isBiggerBetter: false
-      weight: 0.35
-
-    - name: zone-availability
-      query: |
-        sum(rate(aggregator_zone_offline_seconds_total[1m]))
-        /
-        (count(aggregator_zone_avg) > 0)
-      threshold: 0.05
-      isBiggerBetter: false
-      weight: 0.20
-
-    - name: sensor-throughput
-      query: 'sum(rate(aggregator_messages_consumed_total[1m]))'
-      threshold: 3.5
-      isBiggerBetter: true
-      weight: 0.10
-
+      weight: 0.5

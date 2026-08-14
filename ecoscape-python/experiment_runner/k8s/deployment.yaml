@@ -20,7 +20,7 @@ spec:
           image: hendrikreiter/ecoscape_bench:0.1.0
           imagePullPolicy: Always
           volumeMounts:
-            - name: experiment-config
+            - name: experiment3-config
               mountPath: /app/experiment_runner/experiment_config
             - name: sut-config
               mountPath: /app/build/sut
@@ -53,6 +53,6 @@ spec:
         - name: monitor-config
           configMap:
             name: monitor-config
-        - name: experiment-config
+        - name: experiment3-config
           configMap:
-            name: experiment-config
+            name: experiment3-config

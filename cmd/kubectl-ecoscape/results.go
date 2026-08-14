@@ -26,9 +26,9 @@ type resultsOptions struct {
 func newResultsCommand() *cobra.Command {
 	opts := &resultsOptions{}
 	cmd := &cobra.Command{
-		Use:   "results <experiment-id>",
-		Short: "Show experiment results from the results ConfigMap",
-		Long: `Reads the results ConfigMap for a completed experiment and displays
+		Use:   "results <experiment3-id>",
+		Short: "Show experiment3 results from the results ConfigMap",
+		Long: `Reads the results ConfigMap for a completed experiment3 and displays
 them as a table or exports them as CSV files.
 
 Examples:
@@ -44,7 +44,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", "", "Path to kubeconfig")
-	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "default", "Namespace of the experiment")
+	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "default", "Namespace of the experiment3")
 	cmd.Flags().StringVarP(&opts.format, "format", "f", "table", "Output format: table, csv, json")
 	cmd.Flags().StringVarP(&opts.outputDir, "output-dir", "o", ".", "Directory for CSV export")
 

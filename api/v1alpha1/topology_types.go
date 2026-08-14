@@ -89,16 +89,31 @@ type TopologySpec struct {
 	// If a pair is not listed, no network chaos is applied between those zones.
 	// +optional
 	Links []ZoneLinkSpec `json:"links,omitempty"`
+
+	// Active controls whether the topology resources (namespaces, ResourceQuotas,
+	// NetworkChaos objects) are currently provisioned. When false the topology
+	// stays in phase Inactive and no cluster resources are created. The
+	// ExperimentController sets this to true when an experiment3 starts and back
+	// to false once the experiment3 completes, so that zone resources only exist
+	// while an experiment3 is running.
+	// +optional
+	Active bool `json:"active,omitempty"`
 }
 
 // TopologyPhase represents the lifecycle phase of a Topology.
-// +kubebuilder:validation:Enum=Pending;Applied;Failed
+// +kubebuilder:validation:Enum=Inactive;Active;Failed
 type TopologyPhase string
 
 const (
-	TopologyPhasePending TopologyPhase = "Pending"
-	TopologyPhaseApplied TopologyPhase = "Applied"
-	TopologyPhaseFailed  TopologyPhase = "Failed"
+	// TopologyPhaseInactive means spec.active is false: no cluster resources
+	// (namespaces, ResourceQuotas, NetworkChaos) have been provisioned.
+	TopologyPhaseInactive TopologyPhase = "Inactive"
+	// TopologyPhaseActive means spec.active is true and all resources are
+	// provisioned and ready.
+	TopologyPhaseActive TopologyPhase = "Active"
+	// TopologyPhaseFailed means the controller encountered an error while
+	// provisioning or deprovisioning resources.
+	TopologyPhaseFailed TopologyPhase = "Failed"
 )
 
 // ZoneStatus captures the observed state of a single zone.
@@ -142,6 +157,7 @@ type TopologyStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=topologies,scope=Namespaced,shortName=top
+// +kubebuilder:printcolumn:name="Active",type="boolean",JSONPath=".spec.active"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

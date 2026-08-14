@@ -40,7 +40,7 @@ data:
                 - name: REDIS_PORT
                   value: "6379"
                 - name: INTERVAL_MS
-                  value: "50"
+                  value: "75"
                 - name: VALUE_BASE
                   value: "20.0"
                 - name: VALUE_DRIFT
@@ -55,7 +55,7 @@ data:
                   memory: "32Mi"
                 limits:
                   cpu: "200m"
-                  memory: "128Mi"
+                  memory: "512Mi"
 
   02-producer-munich.yaml: |
     apiVersion: apps/v1
@@ -90,7 +90,7 @@ data:
                 - name: REDIS_PORT
                   value: "6379"
                 - name: INTERVAL_MS
-                  value: "50"
+                  value: "75"
                 - name: VALUE_BASE
                   value: "22.0"
                 - name: VALUE_DRIFT
@@ -105,4 +105,4 @@ data:
                   memory: "32Mi"
                 limits:
                   cpu: "100m"
-                  memory: "64Mi"
+                  memory: "512Mi"

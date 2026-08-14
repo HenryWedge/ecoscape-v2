@@ -9,7 +9,7 @@ import (
 func main() {
 	root := &cobra.Command{
 		Use:   "kubectl-ecoscape",
-		Short: "Ecoscape - reliability experiment runner plugin for kubectl",
+		Short: "Ecoscape - reliability experiment3 runner plugin for kubectl",
 		Long: `A kubectl plugin for managing Ecoscape experiments.
 
   Create, run and analyze reliability experiments on Kubernetes.

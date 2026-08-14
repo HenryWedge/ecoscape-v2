@@ -25,7 +25,7 @@ type initOptions struct {
 func newInitCommand() *cobra.Command {
 	opts := &initOptions{}
 	cmd := &cobra.Command{
-		Use:   "init <experiment-name>",
+		Use:   "init <experiment3-name>",
 		Short: "Bootstrap ConfigMaps and Experiment CR from a manifest directory",
 		Long: `Scans a directory for Kubernetes manifest subdirectories and creates
 ConfigMaps and an Experiment custom resource.
@@ -35,7 +35,7 @@ Expected directory structure:
     sut/       System Under Test manifests
     load/      Load generator manifests
     infra/     Infrastructure constraint manifests
-    chaos/     Chaos experiment manifests
+    chaos/     Chaos experiment3 manifests
     monitor/   Monitoring manifests (ServiceMonitor, PodMonitor)
 
 Example:
@@ -175,7 +175,7 @@ func runInit(cmd *cobra.Command, opts *initOptions) error {
 	experiment.SetName(opts.name)
 	experiment.SetNamespace(opts.namespace)
 	if err := yaml.Unmarshal(experimentYAML, experiment.Object); err != nil {
-		return fmt.Errorf("parse experiment yaml: %w", err)
+		return fmt.Errorf("parse experiment3 yaml: %w", err)
 	}
 
 	if err := clients.runtimeClient.Create(cmd.Context(), experiment); err != nil {

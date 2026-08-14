@@ -36,6 +36,7 @@ data:
       labels:
         app: redis
         zone: berlin
+        ecoscape: "true"
     spec:
       replicas: 1
       selector:
@@ -47,6 +48,7 @@ data:
           labels:
             app: redis
             zone: berlin
+            ecoscape: "true"
         spec:
           containers:
             - name: redis
@@ -91,6 +93,7 @@ data:
       labels:
         app: redis
         zone: munich
+        ecoscape: "true"
     spec:
       replicas: 1
       selector:
@@ -102,6 +105,7 @@ data:
           labels:
             app: redis
             zone: munich
+            ecoscape: "true"
         spec:
           containers:
             - name: redis
@@ -178,7 +182,7 @@ data:
                   cpu: "50m"
                   memory: "32Mi"
                 limits:
-                  cpu: "100m"
+                  cpu: "500m"
                   memory: "64Mi"
 
   04-redis-exporter-munich.yaml: |
@@ -206,6 +210,7 @@ data:
       namespace: two-zone-edge-munich
       labels:
         app: redis-exporter
+        chaos-mesh.org/inject: disable
         zone: munich
     spec:
       replicas: 1
@@ -237,7 +242,7 @@ data:
                   cpu: "50m"
                   memory: "32Mi"
                 limits:
-                  cpu: "100m"
+                  cpu: "500m"
                   memory: "64Mi"
 
   # ── Aggregator ────────────────────────────────────────────────────────────
@@ -264,6 +269,7 @@ data:
       namespace: two-zone-edge-cloud
       labels:
         app: aggregator
+        ecoscape: "true"
     spec:
       replicas: 1
       selector:
@@ -273,6 +279,7 @@ data:
         metadata:
           labels:
             app: aggregator
+            ecoscape: "true"
           annotations:
             prometheus.io/scrape: "true"
             prometheus.io/port: "8000"
@@ -304,10 +311,10 @@ data:
                   containerPort: 8000
               resources:
                 requests:
-                  cpu: "100m"
+                  cpu: "50m"
                   memory: "64Mi"
                 limits:
-                  cpu: "500m"
+                  cpu: "50m"
                   memory: "256Mi"
               readinessProbe:
                 httpGet:

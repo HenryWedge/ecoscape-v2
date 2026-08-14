@@ -21,35 +21,13 @@
 apiVersion: ecoscape.cau-se.de/v1alpha1
 kind: ChaosPhase
 metadata:
-  name: esp-stress-munich
+  name: esp-stress-cloud
   namespace: default
 spec:
   topologyRef:
     name: two-zone-edge
   faults:
     - type: CPUStress
-      zones: [munich]
+      zones: [cloud]
       workers: 2
       load: 80
-
-    - type: MemoryStress
-      zones: [munich]
-      workers: 1
-      size: "128MiB"
-
-    # Escape-Hatch: DNSChaos ist kein typisierter Fault-Typ — wird as-is an Chaos Mesh übergeben.
-    # metadata.namespace muss explizit gesetzt sein.
-    - type: Custom
-      manifest: |
-        apiVersion: chaos-mesh.org/v1alpha1
-        kind: DNSChaos
-        metadata:
-          name: munich-dns-error
-          namespace: two-zone-edge-munich
-        spec:
-          action: error
-          mode: all
-          selector:
-            namespaces:
-              - two-zone-edge-munich
-          duration: "60s"

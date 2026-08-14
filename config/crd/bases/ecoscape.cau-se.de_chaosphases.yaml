@@ -54,7 +54,7 @@ spec:
             description: ChaosPhaseSpec defines the desired fault set for a ChaosPhase.
             properties:
               faults:
-                description: Faults to inject during the experiment's chaos measurement
+                description: Faults to inject during the experiment3's chaos measurement
                   window.
                 items:
                   description: |-

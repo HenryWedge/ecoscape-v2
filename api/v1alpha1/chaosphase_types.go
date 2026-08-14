@@ -75,7 +75,7 @@ type ChaosPhaseSpec struct {
 	// Required.
 	TopologyRef corev1.LocalObjectReference `json:"topologyRef"`
 
-	// Faults to inject during the experiment's chaos measurement window.
+	// Faults to inject during the experiment3's chaos measurement window.
 	// +kubebuilder:validation:MinItems=1
 	Faults []FaultSpec `json:"faults"`
 }
@@ -86,8 +86,8 @@ type ChaosPhaseSpec struct {
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // ChaosPhase defines a reusable, named set of faults to inject during an
-// experiment's chaos measurement window. It acts as a template: no controller
-// reconciles it directly. The experiment controller reads it at runtime and
+// experiment3's chaos measurement window. It acts as a template: no controller
+// reconciles it directly. The experiment3 controller reads it at runtime and
 // materialises temporary Chaos Mesh objects for the duration of the measurement
 // window, cleaning them up afterwards.
 type ChaosPhase struct {

@@ -11,13 +11,19 @@ spec:
     kind: Experiment
     listKind: ExperimentList
     plural: experiments
-    singular: experiment3
+    singular: experiment
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.subPhase
+      name: SubPhase
+      type: string
+    - jsonPath: .status.repetitionsCompleted
+      name: Repetitions
+      type: integer
     - jsonPath: .status.aggregateScore
       name: Score
       type: number
@@ -52,8 +58,7 @@ spec:
               chaosPhaseRef:
                 description: |-
                   Reference to a ChaosPhase object (same namespace) defining the faults to
-                  inject during the chaos measurement window. The ChaosPhase lifecycle is
-                  independent of the experiment — it is not deleted on cleanup.
+                  inject during the chaos measurement window.
                 properties:
                   name:
                     default: ""
@@ -67,7 +72,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               duration:
-                description: Timing configuration for experiment3 phases.
+                description: Timing configuration for experiment phases.
                 properties:
                   chaosDelay:
                     description: Delay before chaos injection (seconds).
@@ -81,13 +86,6 @@ spec:
                     description: Delay before starting load generation (seconds).
                     format: int32
                     type: integer
-                  topologyDelay:
-                    description: |-
-                      Stabilization delay after the Topology becomes Active (seconds).
-                      Use this to give SUT and load pods time to fully start up under
-                      the new network conditions before the pre-chaos evaluation begins.
-                    format: int32
-                    type: integer
                   measurementDuration:
                     description: Duration of the chaos evaluation phase (seconds).
                     format: int32
@@ -99,20 +97,17 @@ spec:
                     type: integer
                   repetitions:
                     default: 1
-                    description: Number of experiment3 repetitions.
+                    description: Number of experiment repetitions.
+                    format: int32
+                    type: integer
+                  topologyDelay:
+                    description: |-
+                      Stabilization delay after the Topology becomes Active (seconds).
+                      Use this to give SUT and load pods time to fully start up under the new
+                      network conditions before the pre-chaos evaluation window begins.
                     format: int32
                     type: integer
                 type: object
-              executionMode:
-                default: FullExperimentRun
-                description: Execution mode selects which phases of the experiment3
-                  lifecycle to run.
-                enum:
-                - FullExperimentRun
-                - ExperimentRun
-                - LoadTest
-                - SystemDeployer
-                type: string
               manifests:
                 description: References to ConfigMaps containing Kubernetes manifests.
                 properties:
@@ -267,11 +262,8 @@ spec:
               topologyRef:
                 description: |-
                   Reference to a Topology object (same namespace) that defines the edge zones
-                  for this experiment. If set, the experiment activates the Topology (sets
-                  spec.active=true) and waits for it to reach phase Active before deploying
-                  the SUT. After the experiment completes the Topology is deactivated again.
-                  The Topology lifecycle is independent of the experiment — it is not deleted
-                  on cleanup.
+                  for this experiment. If set, the experiment waits for the Topology to reach
+                  phase Active before deploying the SUT.
                 properties:
                   name:
                     default: ""
@@ -285,7 +277,6 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
             required:
-            - executionMode
             - prometheus
             - slos
             type: object
@@ -293,10 +284,10 @@ spec:
             description: ExperimentStatus defines the observed state of Experiment.
             properties:
               aggregateScore:
-                description: Weighted aggregate score over all completed repetitions.
+                description: Weighted aggregate score of the latest completed repetition.
                 type: number
               completionTime:
-                description: Timestamp when the experiment3 completed.
+                description: Timestamp when the experiment completed.
                 format: date-time
                 type: string
               conditions:
@@ -356,12 +347,8 @@ spec:
                   - type
                   type: object
                 type: array
-              currentRepetition:
-                description: Index of the currently running repetition (1-based).
-                format: int32
-                type: integer
               experimentId:
-                description: Random 5-character experiment3 identifier.
+                description: Random 5-character experiment identifier.
                 type: string
               manifestConfigMaps:
                 description: Names of ConfigMaps created by the operator for manifest
@@ -369,67 +356,58 @@ spec:
                 items:
                   type: string
                 type: array
+              measurementState:
+                description: Running measurement aggregates for the current repetition.
+                items:
+                  description: |-
+                    SLOMeasurementState holds running aggregate data for one SLO during the
+                    current measurement window. It is stored in the CR status so that no
+                    in-memory state is needed between reconcile calls.
+                  properties:
+                    count:
+                      description: Number of observations recorded so far.
+                      format: int32
+                      type: integer
+                    max:
+                      description: Maximum observed SLI value.
+                      type: number
+                    min:
+                      description: Minimum observed SLI value.
+                      type: number
+                    minSet:
+                      description: |-
+                        MinSet is true once at least one value has been recorded (so Min=0 is not
+                        mistaken for "no data").
+                      type: boolean
+                    name:
+                      description: SLO name (matches SLOConfig.Name).
+                      type: string
+                    sum:
+                      description: Running sum of all observed SLI values.
+                      type: number
+                    violations:
+                      description: Number of threshold violations recorded so far.
+                      format: int32
+                      type: integer
+                  required:
+                  - count
+                  - max
+                  - min
+                  - minSet
+                  - name
+                  - sum
+                  - violations
+                  type: object
+                type: array
               phase:
-                description: Current phase of the experiment3.
+                description: Current phase of the experiment.
                 enum:
                 - Pending
-                - WaitingForTopology
                 - Running
                 - Succeeded
                 - Failed
                 - Cancelled
                 type: string
-              repetitionResults:
-                description: Per-repetition results.
-                items:
-                  properties:
-                    aggregateScore:
-                      description: Weighted aggregate score for this repetition.
-                      type: number
-                    repetition:
-                      description: Repetition index (1-based).
-                      format: int32
-                      type: integer
-                    sloResults:
-                      description: Per-SLO results for this repetition.
-                      items:
-                        properties:
-                          evaluations:
-                            description: Total number of SLO evaluations.
-                            format: int32
-                            type: integer
-                          maxSli:
-                            description: Maximum SLI value observed.
-                            type: number
-                          meanSli:
-                            description: Mean SLI value over all evaluations.
-                            type: number
-                          minSli:
-                            description: Minimum SLI value observed.
-                            type: number
-                          name:
-                            description: SLO name (matches SLOConfig.Name).
-                            type: string
-                          violationScore:
-                            description: Normalized violation score [0, 1].
-                            type: number
-                          violations:
-                            description: Number of threshold violations.
-                            format: int32
-                            type: integer
-                        required:
-                        - evaluations
-                        - meanSli
-                        - name
-                        - violationScore
-                        type: object
-                      type: array
-                  required:
-                  - aggregateScore
-                  - repetition
-                  - sloResults
-                  type: object
-                type: array
               repetitionsCompleted:
                 description: Number of successfully completed repetitions.
                 format: int32
@@ -469,11 +447,37 @@ spec:
                   type: object
                 type: array
               startTime:
-                description: Timestamp when the experiment3 started.
+                description: Timestamp when the experiment started.
+                format: date-time
+                type: string
+              subPhase:
+                description: Current sub-phase within a running repetition.
+                enum:
+                - Deploying
+                - WaitingForTopology
+                - TopologyDelay
+                - LoadDelay
+                - PreChaosMeasurement
+                - ApplyingChaos
+                - ChaosMeasurement
+                - Cleanup
+                - Pause
+                type: string
+              subPhaseDuration:
+                description: Total duration the current sub-phase should run (seconds).
+                format: int32
+                type: integer
+              subPhaseElapsed:
+                description: Elapsed time in the current sub-phase (seconds, updated
+                  each reconcile).
+                format: int32
+                type: integer
+              subPhaseStartTime:
+                description: Timestamp when the current sub-phase started.
                 format: date-time
                 type: string
               topologyRef:
-                description: Name of the Topology used in this experiment3 run (set
+                description: Name of the Topology used in this experiment run (set
                   if topologyRef was provided).
                 type: string
             type: object

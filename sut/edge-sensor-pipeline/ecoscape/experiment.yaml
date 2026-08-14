@@ -4,7 +4,6 @@ metadata:
   name: edge-sensor-pipeline-partition
   namespace: default
 spec:
-  executionMode: FullExperimentRun
   topologyRef:
     name: two-zone-edge
   chaosPhaseRef:
@@ -15,7 +14,7 @@ spec:
     chaosDelay: 30
     topologyDelay: 15
     measurementDuration: 90
-    repetitions: 3
+    repetitions: 2
     pauseBetweenRepetitions: 90
 
   manifests:

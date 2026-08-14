@@ -5,16 +5,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// +kubebuilder:validation:Enum=FullExperimentRun;ExperimentRun;LoadTest;SystemDeployer
-type ExecutionMode string
-
-const (
-	ExecutionModeFull         ExecutionMode = "FullExperimentRun"
-	ExecutionModeExperiment   ExecutionMode = "ExperimentRun"
-	ExecutionModeLoadTest     ExecutionMode = "LoadTest"
-	ExecutionModeSystemDeploy ExecutionMode = "SystemDeployer"
-)
-
 // +kubebuilder:validation:Enum=LessThan;LessThanOrEqual;GreaterThan;GreaterThanOrEqual
 type ThresholdDirection string
 
@@ -23,6 +13,21 @@ const (
 	ThresholdLTE ThresholdDirection = "LessThanOrEqual"
 	ThresholdGT  ThresholdDirection = "GreaterThan"
 	ThresholdGTE ThresholdDirection = "GreaterThanOrEqual"
+)
+
+// +kubebuilder:validation:Enum=Deploying;WaitingForTopology;TopologyDelay;LoadDelay;PreChaosMeasurement;ApplyingChaos;ChaosMeasurement;Cleanup;Pause
+type ExperimentSubPhase string
+
+const (
+	SubPhaseDeploying           ExperimentSubPhase = "Deploying"
+	SubPhaseWaitingForTopology  ExperimentSubPhase = "WaitingForTopology"
+	SubPhaseTopologyDelay       ExperimentSubPhase = "TopologyDelay"
+	SubPhaseLoadDelay           ExperimentSubPhase = "LoadDelay"
+	SubPhasePreChaosMeasurement ExperimentSubPhase = "PreChaosMeasurement"
+	SubPhaseApplyingChaos       ExperimentSubPhase = "ApplyingChaos"
+	SubPhaseChaosMeasurement    ExperimentSubPhase = "ChaosMeasurement"
+	SubPhaseCleanup             ExperimentSubPhase = "Cleanup"
+	SubPhasePause               ExperimentSubPhase = "Pause"
 )
 
 type DurationConfig struct {
@@ -43,7 +48,7 @@ type DurationConfig struct {
 	// Duration of the chaos evaluation phase (seconds).
 	// +optional
 	MeasurementDuration *int32 `json:"measurementDuration,omitempty"`
-	// Number of experiment3 repetitions.
+	// Number of experiment repetitions.
 	// +optional
 	// +kubebuilder:default=1
 	Repetitions int32 `json:"repetitions,omitempty"`
@@ -113,24 +118,19 @@ type SLOConfig struct {
 
 // ExperimentSpec defines the desired state of Experiment.
 type ExperimentSpec struct {
-	// Execution mode selects which phases of the experiment3 lifecycle to run.
-	// +kubebuilder:default=FullExperimentRun
-	ExecutionMode ExecutionMode `json:"executionMode"`
-	// Timing configuration for experiment3 phases.
+	// Timing configuration for experiment phases.
 	// +optional
 	Duration DurationConfig `json:"duration,omitempty"`
 	// References to ConfigMaps containing Kubernetes manifests.
 	// +optional
 	Manifests ManifestsConfig `json:"manifests,omitempty"`
 	// Reference to a Topology object (same namespace) that defines the edge zones
-	// for this experiment3. If set, the experiment3 waits for the Topology to reach
-	// phase Applied before deploying the SUT. The Topology lifecycle is independent
-	// of the experiment3 — it is not deleted on cleanup.
+	// for this experiment. If set, the experiment waits for the Topology to reach
+	// phase Active before deploying the SUT.
 	// +optional
 	TopologyRef *corev1.LocalObjectReference `json:"topologyRef,omitempty"`
 	// Reference to a ChaosPhase object (same namespace) defining the faults to
-	// inject during the chaos measurement window. The ChaosPhase lifecycle is
-	// independent of the experiment3 — it is not deleted on cleanup.
+	// inject during the chaos measurement window.
 	// +optional
 	ChaosPhaseRef *corev1.LocalObjectReference `json:"chaosPhaseRef,omitempty"`
 	// Prometheus connection configuration.
@@ -169,51 +169,80 @@ type RepetitionResult struct {
 	AggregateScore float64 `json:"aggregateScore"`
 }
 
-// +kubebuilder:validation:Enum=Pending;WaitingForTopology;Running;Succeeded;Failed;Cancelled
+// SLOMeasurementState holds running aggregate data for one SLO during the
+// current measurement window. It is stored in the CR status so that no
+// in-memory state is needed between reconcile calls.
+type SLOMeasurementState struct {
+	// SLO name (matches SLOConfig.Name).
+	Name string `json:"name"`
+	// Running sum of all observed SLI values.
+	Sum float64 `json:"sum"`
+	// Number of observations recorded so far.
+	Count int32 `json:"count"`
+	// Number of threshold violations recorded so far.
+	Violations int32 `json:"violations"`
+	// Minimum observed SLI value.
+	Min float64 `json:"min"`
+	// Maximum observed SLI value.
+	Max float64 `json:"max"`
+	// MinSet is true once at least one value has been recorded (so Min=0 is not
+	// mistaken for "no data").
+	MinSet bool `json:"minSet"`
+}
+
+// +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Cancelled
 type ExperimentPhase string
 
 const (
-	PhasePending            ExperimentPhase = "Pending"
-	PhaseWaitingForTopology ExperimentPhase = "WaitingForTopology"
-	PhaseRunning            ExperimentPhase = "Running"
-	PhaseSucceeded          ExperimentPhase = "Succeeded"
-	PhaseFailed             ExperimentPhase = "Failed"
-	PhaseCancelled          ExperimentPhase = "Cancelled"
+	PhasePending   ExperimentPhase = "Pending"
+	PhaseRunning   ExperimentPhase = "Running"
+	PhaseSucceeded ExperimentPhase = "Succeeded"
+	PhaseFailed    ExperimentPhase = "Failed"
+	PhaseCancelled ExperimentPhase = "Cancelled"
 )
 
 // ExperimentStatus defines the observed state of Experiment.
 type ExperimentStatus struct {
-	// Current phase of the experiment3.
+	// Current phase of the experiment.
 	// +optional
 	Phase ExperimentPhase `json:"phase,omitempty"`
-	// Random 5-character experiment3 identifier.
+	// Current sub-phase within a running repetition.
+	// +optional
+	SubPhase ExperimentSubPhase `json:"subPhase,omitempty"`
+	// Timestamp when the current sub-phase started.
+	// +optional
+	SubPhaseStartTime *metav1.Time `json:"subPhaseStartTime,omitempty"`
+	// Total duration the current sub-phase should run (seconds).
+	// +optional
+	SubPhaseDuration int32 `json:"subPhaseDuration,omitempty"`
+	// Elapsed time in the current sub-phase (seconds, updated each reconcile).
+	// +optional
+	SubPhaseElapsed int32 `json:"subPhaseElapsed,omitempty"`
+	// Running measurement aggregates for the current repetition.
+	// +optional
+	MeasurementState []SLOMeasurementState `json:"measurementState,omitempty"`
+	// Random 5-character experiment identifier.
 	// +optional
 	ExperimentID string `json:"experimentId,omitempty"`
-	// Name of the Topology used in this experiment3 run (set if topologyRef was provided).
+	// Name of the Topology used in this experiment run (set if topologyRef was provided).
 	// +optional
 	TopologyRef string `json:"topologyRef,omitempty"`
-	// Timestamp when the experiment3 started.
+	// Timestamp when the experiment started.
 	// +optional
 	StartTime *metav1.Time `json:"startTime,omitempty"`
-	// Timestamp when the experiment3 completed.
+	// Timestamp when the experiment completed.
 	// +optional
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 	// Number of successfully completed repetitions.
 	// +optional
 	RepetitionsCompleted int32 `json:"repetitionsCompleted,omitempty"`
-	// Index of the currently running repetition (1-based).
-	// +optional
-	CurrentRepetition int32 `json:"currentRepetition,omitempty"`
 	// Names of ConfigMaps created by the operator for manifest content.
 	// +optional
 	ManifestConfigMaps []string `json:"manifestConfigMaps,omitempty"`
 	// Per-SLO results for the latest completed repetition.
 	// +optional
 	SloResults []SLOResult `json:"sloResults,omitempty"`
-	// Per-repetition results.
-	// +optional
-	RepetitionResults []RepetitionResult `json:"repetitionResults,omitempty"`
-	// Weighted aggregate score over all completed repetitions.
+	// Weighted aggregate score of the latest completed repetition.
 	// +optional
 	AggregateScore *float64 `json:"aggregateScore,omitempty"`
 	// Standard conditions.
@@ -225,6 +254,8 @@ type ExperimentStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=experiments,scope=Namespaced
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
+// +kubebuilder:printcolumn:name="SubPhase",type="string",JSONPath=".status.subPhase"
+// +kubebuilder:printcolumn:name="Repetitions",type="integer",JSONPath=".status.repetitionsCompleted"
 // +kubebuilder:printcolumn:name="Score",type="number",JSONPath=".status.aggregateScore"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

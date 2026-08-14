@@ -60,9 +60,9 @@ spec:
                   Active controls whether the topology resources (namespaces, ResourceQuotas,
                   NetworkChaos objects) are currently provisioned. When false the topology
                   stays in phase Inactive and no cluster resources are created. The
-                  ExperimentController sets this to true when an experiment starts and back
-                  to false once the experiment completes, so that zone resources only exist
-                  while an experiment is running.
+                  ExperimentController sets this to true when an experiment3 starts and back
+                  to false once the experiment3 completes, so that zone resources only exist
+                  while an experiment3 is running.
                 type: boolean
               links:
                 description: |-

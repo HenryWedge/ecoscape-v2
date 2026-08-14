@@ -210,7 +210,7 @@ type ExperimentReconciler struct {
 // +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments/finalizers,verbs=update
-// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=topologies,verbs=get;list;watch
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=topologies,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods;services;endpoints;events;namespaces,verbs=get;list;watch;create;update;patch;delete
@@ -223,7 +223,7 @@ type ExperimentReconciler struct {
 
 func (reconciler *ExperimentReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("reconciling experiment", "namespacedName", request.NamespacedName)
+	logger.Info("reconciling experiment3", "namespacedName", request.NamespacedName)
 
 	experiment := &experimentv1alpha1.Experiment{}
 	if err := reconciler.Get(ctx, request.NamespacedName, experiment); err != nil {
@@ -239,13 +239,13 @@ func (reconciler *ExperimentReconciler) Reconcile(ctx context.Context, request c
 	}
 
 	if err := reconciler.runExperiment(ctx, experiment); err != nil {
-		logger.Error(err, "experiment failed")
+		logger.Error(err, "experiment3 failed")
 		reconciler.setPhase(ctx, experiment, experimentv1alpha1.PhaseFailed, err.Error())
 		return ctrl.Result{}, err
 	}
 
 	reconciler.setPhase(ctx, experiment, experimentv1alpha1.PhaseSucceeded, "")
-	logger.Info("experiment succeeded", "aggregateScore", experiment.Status.AggregateScore)
+	logger.Info("experiment3 succeeded", "aggregateScore", experiment.Status.AggregateScore)
 	return ctrl.Result{}, nil
 }
 
@@ -259,30 +259,24 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 	}
 
 	now := metav1.Now()
+	base := experiment.DeepCopy()
 	experiment.Status.ExperimentID = experimentID
 	experiment.Status.Phase = experimentv1alpha1.PhaseRunning
 	experiment.Status.StartTime = &now
 	experiment.Status.CurrentRepetition = 1
 
-	// If a Topology is referenced, record it in the status and wait until it is Applied.
+	// Record topology name in status if referenced.
 	if experiment.Spec.TopologyRef != nil {
 		experiment.Status.TopologyRef = experiment.Spec.TopologyRef.Name
-		if err := reconciler.Status().Update(ctx, experiment); err != nil {
-			return fmt.Errorf("status update: %w", err)
-		}
-		logger.Info("waiting for topology", "topology", experiment.Spec.TopologyRef.Name, "namespace", namespace)
-		if err := reconciler.waitForTopology(ctx, namespace, experiment.Spec.TopologyRef.Name); err != nil {
-			return fmt.Errorf("topology not ready: %w", err)
-		}
-		logger.Info("topology is Applied, proceeding")
 	}
 
-	if err := reconciler.Status().Update(ctx, experiment); err != nil {
+	if err := reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base)); err != nil {
 		return fmt.Errorf("status update: %w", err)
 	}
 
 	repetitions := derefOr(&experiment.Spec.Duration.Repetitions, 1)
 	loadDelay := derefOr(experiment.Spec.Duration.LoadDelay, 0)
+	topologyDelay := derefOr(experiment.Spec.Duration.TopologyDelay, 0)
 	chaosDelay := derefOr(experiment.Spec.Duration.ChaosDelay, 0)
 	measurementDuration := derefOr(experiment.Spec.Duration.MeasurementDuration, 60)
 	pauseBetweenRepetitions := derefOr(&experiment.Spec.Duration.PauseBetweenRepetitions, 60)
@@ -320,8 +314,53 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 				return err
 			}
 		}
+		base := experiment.DeepCopy()
 		experiment.Status.ManifestConfigMaps = ownedConfigMaps
-		_ = reconciler.Status().Update(ctx, experiment)
+		_ = reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base))
+
+		for second := int32(0); second < 10; second++ {
+			if err := sleepWithContext(ctx, time.Second); err != nil {
+				return err
+			}
+			logger.Info("activating topology", "seconds", second)
+		}
+
+		// Activate the topology after the SUT is deployed so that network
+		// conditions and resource constraints take effect on a running system.
+
+		if experiment.Spec.TopologyRef != nil {
+			base := experiment.DeepCopy()
+			experiment.Status.Phase = experimentv1alpha1.PhaseWaitingForTopology
+			_ = reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base))
+			logger.Info("activating topology", "topology", experiment.Spec.TopologyRef.Name)
+			if err := reconciler.activateTopology(ctx, namespace, experiment.Spec.TopologyRef.Name); err != nil {
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return fmt.Errorf("activate topology: %w", err)
+			}
+			logger.Info("waiting for topology to become Active", "topology", experiment.Spec.TopologyRef.Name)
+			if err := reconciler.waitForTopology(ctx, namespace, experiment.Spec.TopologyRef.Name); err != nil {
+				reconciler.deactivateTopology(ctx, namespace, experiment.Spec.TopologyRef.Name) //nolint:errcheck
+				reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+				return fmt.Errorf("topology not ready: %w", err)
+			}
+			logger.Info("topology is Active, proceeding")
+			base = experiment.DeepCopy()
+			experiment.Status.Phase = experimentv1alpha1.PhaseRunning
+			_ = reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base))
+
+			if topologyDelay > 0 {
+				logger.Info("waiting for topology stabilization", "seconds", topologyDelay)
+				for second := int32(0); second < topologyDelay; second++ {
+					remaining := topologyDelay - second
+					logger.Info("topology stabilization countdown", "remaining_seconds", remaining)
+					if err := sleepWithContext(ctx, time.Second); err != nil {
+						reconciler.deactivateTopology(ctx, namespace, experiment.Spec.TopologyRef.Name) //nolint:errcheck
+						reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
+						return err
+					}
+				}
+			}
+		}
 
 		logger.Info("waiting load delay", "seconds", loadDelay)
 		for second := int32(0); second < loadDelay; second++ {
@@ -371,11 +410,21 @@ func (reconciler *ExperimentReconciler) runExperiment(ctx context.Context, exper
 		reconciler.cleanupChaosPhase(ctx, chaosRefs)
 		reconciler.cleanup(ctx, namespace, ownedConfigMaps, experiment)
 
+		// Deactivate the topology after each repetition so zone resources
+		// (namespaces, quotas, NetworkChaos) are torn down before the next run.
+		if experiment.Spec.TopologyRef != nil {
+			logger.Info("deactivating topology", "topology", experiment.Spec.TopologyRef.Name)
+			if err := reconciler.deactivateTopology(ctx, namespace, experiment.Spec.TopologyRef.Name); err != nil {
+				logger.Error(err, "failed to deactivate topology")
+			}
+		}
+
+		experiment.DeepCopy()
 		experiment.Status.RepetitionsCompleted = repetition
 		experiment.Status.SloResults = latestSloResults
 		experiment.Status.RepetitionResults = allRepetitionResults
 		experiment.Status.AggregateScore = float64Ptr(aggregateScore(experiment.Spec.SLOs, latestSloResults))
-		_ = reconciler.Status().Update(ctx, experiment)
+		_ = reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base))
 
 		if repetition < repetitions {
 			logger.Info("pausing before next repetition", "seconds", pauseBetweenRepetitions)
@@ -417,6 +466,7 @@ func (reconciler *ExperimentReconciler) cleanup(ctx context.Context, namespace s
 }
 
 func (reconciler *ExperimentReconciler) setPhase(ctx context.Context, experiment *experimentv1alpha1.Experiment, phase experimentv1alpha1.ExperimentPhase, message string) {
+	base := experiment.DeepCopy()
 	experiment.Status.Phase = phase
 	condition := metav1.Condition{
 		Type:               "Completed",
@@ -428,7 +478,7 @@ func (reconciler *ExperimentReconciler) setPhase(ctx context.Context, experiment
 	if phase == experimentv1alpha1.PhaseSucceeded || phase == experimentv1alpha1.PhaseFailed {
 		experiment.Status.Conditions = append(experiment.Status.Conditions, condition)
 	}
-	_ = reconciler.Status().Update(ctx, experiment)
+	_ = reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base))
 }
 
 func (reconciler *ExperimentReconciler) writeResultsConfigMap(ctx context.Context, namespace, experimentID string, experiment *experimentv1alpha1.Experiment, repetitionResults []experimentv1alpha1.RepetitionResult) error {
@@ -622,21 +672,55 @@ func (reconciler *ExperimentReconciler) waitForTopology(ctx context.Context, nam
 				return fmt.Errorf("get Topology %s/%s: %w", namespace, name, err)
 			}
 			switch topology.Status.Phase {
-			case experimentv1alpha1.TopologyPhaseApplied:
+			case experimentv1alpha1.TopologyPhaseActive:
 				return nil
 			case experimentv1alpha1.TopologyPhaseFailed:
 				return fmt.Errorf("Topology %s/%s is in Failed phase", namespace, name)
 			}
-			// Pending or phase not yet set — keep waiting.
-			logger.Info("waiting for topology to reach Applied phase", "topology", name, "phase", topology.Status.Phase, "elapsed", elapsed, "timeout_in", remaining)
+			// Inactive or phase not yet set — keep waiting.
+			logger.Info("waiting for topology to reach Active phase", "topology", name, "phase", topology.Status.Phase, "elapsed", elapsed, "timeout_in", remaining)
 		}
 	}
+}
+
+// activateTopology patches the referenced Topology's spec.active to true,
+// causing the TopologyReconciler to provision zone namespaces, ResourceQuotas,
+// and NetworkChaos objects.
+func (reconciler *ExperimentReconciler) activateTopology(ctx context.Context, namespace, name string) error {
+	topology := &experimentv1alpha1.Topology{}
+	if err := reconciler.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, topology); err != nil {
+		return fmt.Errorf("get topology %s/%s: %w", namespace, name, err)
+	}
+	if topology.Spec.Active {
+		return nil // already active — nothing to do
+	}
+	patch := client.MergeFrom(topology.DeepCopy())
+	topology.Spec.Active = true
+	return reconciler.Patch(ctx, topology, patch)
+}
+
+// deactivateTopology patches the referenced Topology's spec.active to false,
+// causing the TopologyReconciler to tear down all provisioned zone resources.
+func (reconciler *ExperimentReconciler) deactivateTopology(ctx context.Context, namespace, name string) error {
+	topology := &experimentv1alpha1.Topology{}
+	if err := reconciler.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, topology); err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get topology %s/%s: %w", namespace, name, err)
+	}
+	if !topology.Spec.Active {
+		return nil // already inactive — nothing to do
+	}
+	patch := client.MergeFrom(topology.DeepCopy())
+	topology.Spec.Active = false
+	return reconciler.Patch(ctx, topology, patch)
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (reconciler *ExperimentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&experimentv1alpha1.Experiment{}).
-		Named("experiment").
+		Named("experiment3").
 		Complete(reconciler)
 }

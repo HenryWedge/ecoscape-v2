@@ -77,18 +77,30 @@ func (r *TopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Skip reconciliation if the spec has not changed since the last successful apply.
-	// Status updates (e.g. from setPhase) increment resourceVersion but not Generation,
-	// so this guard prevents the infinite reconcile loop that would otherwise result.
-	if topology.Status.Phase == ecosv1alpha1.TopologyPhaseApplied &&
-		topology.Status.ObservedGeneration == topology.Generation {
-		return ctrl.Result{}, nil
+	// Skip reconciliation if the observed state already matches the desired state.
+	// Status updates increment resourceVersion but not Generation, so this guard
+	// prevents the infinite reconcile loop that would otherwise result.
+	if topology.Status.ObservedGeneration == topology.Generation {
+		if topology.Spec.Active && topology.Status.Phase == ecosv1alpha1.TopologyPhaseActive {
+			return ctrl.Result{}, nil
+		}
+		if !topology.Spec.Active && topology.Status.Phase == ecosv1alpha1.TopologyPhaseInactive {
+			return ctrl.Result{}, nil
+		}
 	}
 
-	if err := r.reconcileApply(ctx, topology); err != nil {
-		logger.Error(err, "failed to apply topology")
-		r.setPhase(ctx, topology, ecosv1alpha1.TopologyPhaseFailed, err.Error())
-		return ctrl.Result{}, err
+	if topology.Spec.Active {
+		if err := r.reconcileApply(ctx, topology); err != nil {
+			logger.Error(err, "failed to apply topology")
+			r.setPhase(ctx, topology, ecosv1alpha1.TopologyPhaseFailed, err.Error())
+			return ctrl.Result{}, err
+		}
+	} else {
+		if err := r.reconcileDeactivate(ctx, topology); err != nil {
+			logger.Error(err, "failed to deactivate topology")
+			r.setPhase(ctx, topology, ecosv1alpha1.TopologyPhaseFailed, err.Error())
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -99,34 +111,14 @@ func (r *TopologyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *TopologyReconciler) reconcileApply(ctx context.Context, topology *ecosv1alpha1.Topology) error {
 	logger := log.FromContext(ctx)
 
-	var zoneStatuses []ecosv1alpha1.ZoneStatus
-	var allChaosRefs []string
-
-	// 1. Zones → Namespace + ResourceQuota.
-	for _, zone := range topology.Spec.Zones {
-		ns := zoneName(topology.Name, zone.Name)
-
-		if err := r.ensureNamespace(ctx, ns, topology.Name, zone.Name); err != nil {
-			return fmt.Errorf("namespace %s: %w", ns, err)
-		}
-
-		status := ecosv1alpha1.ZoneStatus{
-			Name:      zone.Name,
-			Namespace: ns,
-		}
-
-		if zone.CPU != nil || zone.Memory != nil || zone.Disk != nil {
-			quotaName, err := r.ensureResourceQuota(ctx, topology.Name, ns, zone)
-			if err != nil {
-				return fmt.Errorf("resource quota for zone %s: %w", zone.Name, err)
-			}
-			status.ResourceQuotaRef = quotaName
-		}
-
-		zoneStatuses = append(zoneStatuses, status)
+	// 1. Zones → Namespace + ResourceQuota (always ensured, even when inactive).
+	zoneStatuses, err := r.reconcileZones(ctx, topology)
+	if err != nil {
+		return err
 	}
 
 	// 2. Links → NetworkChaos objects.
+	var allChaosRefs []string
 	for i, link := range topology.Spec.Links {
 		if len(link.Zones) != 2 {
 			logger.Info("skipping link with wrong number of zones", "index", i, "zones", link.Zones)
@@ -141,7 +133,7 @@ func (r *TopologyReconciler) reconcileApply(ctx context.Context, topology *ecosv
 
 	topology.Status.Zones = zoneStatuses
 	topology.Status.NetworkChaosRefs = allChaosRefs
-	topology.Status.Phase = ecosv1alpha1.TopologyPhaseApplied
+	topology.Status.Phase = ecosv1alpha1.TopologyPhaseActive
 	topology.Status.ObservedGeneration = topology.Generation
 	if err := r.Status().Update(ctx, topology); err != nil {
 		return fmt.Errorf("status update: %w", err)
@@ -149,6 +141,88 @@ func (r *TopologyReconciler) reconcileApply(ctx context.Context, topology *ecosv
 
 	logger.Info("topology applied", "zones", len(zoneStatuses), "networkChaosObjects", len(allChaosRefs))
 	return nil
+}
+
+// ── Deactivate ─────────────────────────────────────────────────────────────
+
+// reconcileDeactivate removes NetworkChaos objects for all links but keeps
+// zone namespaces and ResourceQuotas intact so that workloads can be deployed
+// into zone namespaces before the topology is activated. It transitions the
+// topology to phase Inactive.
+func (r *TopologyReconciler) reconcileDeactivate(ctx context.Context, topology *ecosv1alpha1.Topology) error {
+	logger := log.FromContext(ctx)
+	logger.Info("deactivating topology — removing NetworkChaos, keeping namespaces")
+
+	// Ensure namespaces and quotas exist so the SUT can be deployed into them
+	// even while the topology is Inactive.
+	zoneStatuses, err := r.reconcileZones(ctx, topology)
+	if err != nil {
+		return err
+	}
+
+	// Delete only the NetworkChaos objects; namespaces and ResourceQuotas stay.
+	for _, ref := range topology.Status.NetworkChaosRefs {
+		parts := strings.SplitN(ref, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		ns, name := parts[0], parts[1]
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "chaos-mesh.org",
+			Version: "v1alpha1",
+			Kind:    networkChaosKind,
+		})
+		obj.SetNamespace(ns)
+		obj.SetName(name)
+		if err := r.Delete(ctx, obj); err != nil && !errors.IsNotFound(err) {
+			logger.Error(err, "failed to delete NetworkChaos", "name", name, "namespace", ns)
+		}
+	}
+
+	topology.Status.Zones = zoneStatuses
+	topology.Status.NetworkChaosRefs = nil
+	topology.Status.Phase = ecosv1alpha1.TopologyPhaseInactive
+	topology.Status.ObservedGeneration = topology.Generation
+	if err := r.Status().Update(ctx, topology); err != nil {
+		return fmt.Errorf("status update: %w", err)
+	}
+
+	logger.Info("topology deactivated", "zones", len(zoneStatuses))
+	return nil
+}
+
+// reconcileZones ensures that a namespace and optional ResourceQuota exist for
+// every zone declared in the topology spec. It returns the observed zone status
+// slice and is called by both reconcileApply and reconcileDeactivate so that
+// zone namespaces are always present regardless of spec.active.
+func (r *TopologyReconciler) reconcileZones(ctx context.Context, topology *ecosv1alpha1.Topology) ([]ecosv1alpha1.ZoneStatus, error) {
+	var zoneStatuses []ecosv1alpha1.ZoneStatus
+
+	for _, zone := range topology.Spec.Zones {
+		ns := zoneName(topology.Name, zone.Name)
+
+		if err := r.ensureNamespace(ctx, ns, topology.Name, zone.Name); err != nil {
+			return nil, fmt.Errorf("namespace %s: %w", ns, err)
+		}
+
+		status := ecosv1alpha1.ZoneStatus{
+			Name:      zone.Name,
+			Namespace: ns,
+		}
+
+		if zone.CPU != nil || zone.Memory != nil || zone.Disk != nil {
+			quotaName, err := r.ensureResourceQuota(ctx, topology.Name, ns, zone)
+			if err != nil {
+				return nil, fmt.Errorf("resource quota for zone %s: %w", zone.Name, err)
+			}
+			status.ResourceQuotaRef = quotaName
+		}
+
+		zoneStatuses = append(zoneStatuses, status)
+	}
+
+	return zoneStatuses, nil
 }
 
 // ── Delete ─────────────────────────────────────────────────────────────────
@@ -319,11 +393,17 @@ func (r *TopologyReconciler) ensureLinkChaos(ctx context.Context, topologyName s
 			"direction": "both",
 			"selector": map[string]interface{}{
 				"namespaces": []interface{}{nsA},
+				"labelSelectors": map[string]interface{}{
+					"ecoscape": "true",
+				},
 			},
 			"target": map[string]interface{}{
 				"mode": "all",
 				"selector": map[string]interface{}{
 					"namespaces": []interface{}{nsB},
+					"labelSelectors": map[string]interface{}{
+						"ecoscape": "true",
+					},
 				},
 			},
 			"delay": buildDelay(link.Latency, link.Jitter),
@@ -343,11 +423,17 @@ func (r *TopologyReconciler) ensureLinkChaos(ctx context.Context, topologyName s
 			"direction": "both",
 			"selector": map[string]interface{}{
 				"namespaces": []interface{}{nsA},
+				"labelSelectors": map[string]interface{}{
+					"ecoscape": "true",
+				},
 			},
 			"target": map[string]interface{}{
 				"mode": "all",
 				"selector": map[string]interface{}{
 					"namespaces": []interface{}{nsB},
+					"labelSelectors": map[string]interface{}{
+						"ecoscape": "true",
+					},
 				},
 			},
 			"bandwidth": buildBandwidth(link.Bandwidth),
@@ -367,11 +453,17 @@ func (r *TopologyReconciler) ensureLinkChaos(ctx context.Context, topologyName s
 			"direction": "both",
 			"selector": map[string]interface{}{
 				"namespaces": []interface{}{nsA},
+				"labelSelectors": map[string]interface{}{
+					"ecoscape": "true",
+				},
 			},
 			"target": map[string]interface{}{
 				"mode": "all",
 				"selector": map[string]interface{}{
 					"namespaces": []interface{}{nsB},
+					"labelSelectors": map[string]interface{}{
+						"ecoscape": "true",
+					},
 				},
 			},
 			"loss": map[string]interface{}{

@@ -56,6 +56,14 @@ type DurationConfig struct {
 	// +optional
 	// +kubebuilder:default=60
 	PauseBetweenRepetitions int32 `json:"pauseBetweenRepetitions,omitempty"`
+	// How often (in seconds) an individual SLI value is written to the
+	// measurements ConfigMap. Aggregates (mean, min, max, violations) are
+	// always computed from every measurement regardless of this setting.
+	// Defaults to 5 (one sample every 5 seconds).
+	// +optional
+	// +kubebuilder:default=5
+	// +kubebuilder:validation:Minimum=1
+	MeasurementSampleInterval *int32 `json:"measurementSampleInterval,omitempty"`
 }
 
 type ManifestRef struct {
@@ -188,6 +196,10 @@ type SLOMeasurementState struct {
 	// MinSet is true once at least one value has been recorded (so Min=0 is not
 	// mistaken for "no data").
 	MinSet bool `json:"minSet"`
+	// Individual measurement values recorded during this window.
+	// Cleared after each repetition once written to the measurements ConfigMap.
+	// +optional
+	Values []float64 `json:"values,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Pending;Running;Succeeded;Failed;Cancelled

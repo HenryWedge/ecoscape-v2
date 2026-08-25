@@ -90,6 +90,16 @@ spec:
                     description: Duration of the chaos evaluation phase (seconds).
                     format: int32
                     type: integer
+                  measurementSampleInterval:
+                    default: 5
+                    description: |-
+                      How often (in seconds) an individual SLI value is written to the
+                      measurements ConfigMap. Aggregates (mean, min, max, violations) are
+                      always computed from every measurement regardless of this setting.
+                      Defaults to 5 (one sample every 5 seconds).
+                    format: int32
+                    minimum: 1
+                    type: integer
                   pauseBetweenRepetitions:
                     default: 60
                     description: Pause between repetitions in seconds.
@@ -385,6 +395,13 @@ spec:
                     sum:
                       description: Running sum of all observed SLI values.
                       type: number
+                    values:
+                      description: |-
+                        Individual measurement values recorded during this window.
+                        Cleared after each repetition once written to the measurements ConfigMap.
+                      items:
+                        type: number
+                      type: array
                     violations:
                       description: Number of threshold violations recorded so far.
                       format: int32

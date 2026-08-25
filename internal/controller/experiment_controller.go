@@ -17,8 +17,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	experimentv1alpha1 "github.com/cau-se/ecoscape/api/v1alpha1"
 )
@@ -338,6 +341,12 @@ func (reconciler *ExperimentReconciler) handleMeasurement(
 ) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	elapsed := reconciler.elapsedSeconds(experiment)
+	base := experiment.DeepCopy()
+	sampleInterval := derefOr(experiment.Spec.Duration.MeasurementSampleInterval, 5)
+
+	if elapsed != 0 && elapsed%sampleInterval != 0 {
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	}
 
 	// Initialize MeasurementState on first entry.
 	if len(experiment.Status.MeasurementState) == 0 {
@@ -366,15 +375,21 @@ func (reconciler *ExperimentReconciler) handleMeasurement(
 		}
 		logger.Info("prometheus value", "slo", slo.Name,
 			"value", strconv.FormatFloat(value, 'f', 4, 64))
-		recordMeasurement(&experiment.Status.MeasurementState[i], value, slo)
+		recordMeasurement(&experiment.Status.MeasurementState[i], value, slo, elapsed, sampleInterval)
 	}
 
-	base := experiment.DeepCopy()
 	experiment.Status.SubPhaseElapsed = elapsed
 
 	if elapsed >= experiment.Status.SubPhaseDuration {
 		logger.Info("measurement window complete, transitioning",
 			"subPhase", experiment.Status.SubPhase, "next", nextSubPhase)
+
+		// Write individual measurements to the ConfigMap before clearing state.
+		currentPhase := experiment.Status.SubPhase
+		if err := reconciler.appendMeasurementsToConfigMap(ctx, experiment.GetNamespace(), experiment, currentPhase); err != nil {
+			return reconciler.failExperiment(ctx, experiment,
+				fmt.Errorf("write measurements configmap: %w", err))
+		}
 
 		// PreChaosMeasurement → skip ApplyingChaos if no ChaosPhaseRef configured.
 		actualNext := nextSubPhase
@@ -547,8 +562,10 @@ func (reconciler *ExperimentReconciler) setPhase(ctx context.Context, experiment
 	return reconciler.Status().Patch(ctx, experiment, client.MergeFrom(base))
 }
 
-// recordMeasurement updates a single SLOMeasurementState with a new value.
-func recordMeasurement(state *experimentv1alpha1.SLOMeasurementState, value float64, slo experimentv1alpha1.SLOConfig) {
+// recordMeasurementAggregate updates the running aggregates (Sum, Count,
+// Min, Max, Violations) for a single SLOMeasurementState. It is called on
+// every reconcile during a measurement window.
+func recordMeasurementAggregate(state *experimentv1alpha1.SLOMeasurementState, value float64, slo experimentv1alpha1.SLOConfig) {
 	state.Sum += value
 	state.Count++
 	if !state.MinSet || value < state.Min {
@@ -567,6 +584,16 @@ func recordMeasurement(state *experimentv1alpha1.SLOMeasurementState, value floa
 		if value > slo.Threshold {
 			state.Violations++
 		}
+	}
+}
+
+// recordMeasurement updates aggregates and, if the current elapsed second
+// falls on a sample boundary, also appends the value to Values[] for the
+// time-series ConfigMap.
+func recordMeasurement(state *experimentv1alpha1.SLOMeasurementState, value float64, slo experimentv1alpha1.SLOConfig, elapsed, sampleInterval int32) {
+	if elapsed%sampleInterval == 0 {
+		recordMeasurementAggregate(state, value, slo)
+		state.Values = append(state.Values, value)
 	}
 }
 
@@ -712,6 +739,66 @@ func (reconciler *ExperimentReconciler) appendRepetitionToConfigMap(
 	return reconciler.Update(ctx, configMap)
 }
 
+// appendMeasurementsToConfigMap writes the individual SLI values collected
+// during one measurement window to the shared measurements ConfigMap for the
+// experiment run. Each measurement is stored as a single JSON line:
+//
+//	{"repetition":1,"phase":"PreChaosMeasurement","slo":"response-time","index":0,"value":42.3}
+//
+// The ConfigMap is created on first write and appended to on subsequent calls.
+func (reconciler *ExperimentReconciler) appendMeasurementsToConfigMap(
+	ctx context.Context,
+	namespace string,
+	experiment *experimentv1alpha1.Experiment,
+	phase experimentv1alpha1.ExperimentSubPhase,
+) error {
+	repetition := experiment.Status.RepetitionsCompleted + 1
+	configMapName := fmt.Sprintf("ecoscape-%s-measurements", experiment.Status.ExperimentID)
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: namespace},
+	}
+
+	isNew := false
+	if err := reconciler.Get(ctx, client.ObjectKeyFromObject(configMap), configMap); err != nil {
+		if !errors.IsNotFound(err) {
+			return fmt.Errorf("get measurements configmap: %w", err)
+		}
+		isNew = true
+	}
+
+	var sb strings.Builder
+	if !isNew {
+		sb.WriteString(configMap.Data["measurements.jsonl"])
+	}
+
+	for _, state := range experiment.Status.MeasurementState {
+		for i, value := range state.Values {
+			line, err := json.Marshal(map[string]interface{}{
+				"repetition": repetition,
+				"phase":      string(phase),
+				"slo":        state.Name,
+				"index":      i,
+				"value":      value,
+			})
+			if err != nil {
+				return fmt.Errorf("marshal measurement: %w", err)
+			}
+			sb.Write(line)
+			sb.WriteByte('\n')
+		}
+	}
+
+	if configMap.Data == nil {
+		configMap.Data = map[string]string{}
+	}
+	configMap.Data["measurements.jsonl"] = sb.String()
+
+	if isNew {
+		return reconciler.Create(ctx, configMap)
+	}
+	return reconciler.Update(ctx, configMap)
+}
+
 // prometheusClient wraps the Prometheus HTTP API.
 type prometheusClient struct {
 	serverURL  string
@@ -816,8 +903,18 @@ func (reconciler *ExperimentReconciler) deactivateTopology(ctx context.Context, 
 
 // SetupWithManager sets up the controller with the Manager.
 func (reconciler *ExperimentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Ignore updates that only touch the status subresource. The controller
+	// drives its own reconcile cadence via RequeueAfter; status patches must
+	// not generate additional reconcile events, otherwise multiple queue
+	// entries accumulate for the same elapsed-second and produce duplicate
+	// measurement samples.
+	statusOnlyChanged := predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration()
+		},
+	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&experimentv1alpha1.Experiment{}).
+		For(&experimentv1alpha1.Experiment{}, builder.WithPredicates(statusOnlyChanged)).
 		Named("experiment").
 		Complete(reconciler)
 }

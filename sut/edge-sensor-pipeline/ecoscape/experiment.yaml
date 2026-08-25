@@ -14,7 +14,7 @@ spec:
     chaosDelay: 30
     topologyDelay: 15
     measurementDuration: 90
-    repetitions: 2
+    repetitions: 8
     pauseBetweenRepetitions: 90
 
   manifests:

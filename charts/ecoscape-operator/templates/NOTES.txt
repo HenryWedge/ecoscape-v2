@@ -1,0 +1,7 @@
+Ecoscape operator has been installed.
+
+Check deployment status:
+  kubectl get pods -n {{ .Release.Namespace }}
+
+Verify CRDs:
+  kubectl get crd experiments.ecoscape.cau-se.de topologies.ecoscape.cau-se.de chaosphases.ecoscape.cau-se.de

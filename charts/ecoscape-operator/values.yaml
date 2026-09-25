@@ -1,0 +1,32 @@
+replicaCount: 1
+
+image:
+  repository: hendrikreiter/ecoscape
+  tag: 0.2.0
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+
+metrics:
+  enabled: true
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+podAnnotations: {}
+
+nameOverride: ""
+fullnameOverride: ""

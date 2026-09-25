@@ -9,6 +9,19 @@ With Ecoscape, you can run reproducible experiments where a system is observed u
 - **ChaosPhase**: Defines reusable faults (for example delay, loss, partition, CPU stress) that are injected during the measurement phase.
 - **Experiment**: Orchestrates the lifecycle (deploy, load, pre-chaos measurement, chaos measurement, cleanup) and references Topology + ChaosPhase.
 
+## Lifecycle
+
+An `Experiment` runs through a deterministic lifecycle so benchmark runs are reproducible and comparable:
+
+1. **Preparation**: Ecoscape resolves `Topology` and `ChaosPhase`, validates references, and prepares namespaces/resources.
+2. **Deploy**: Manifests from `spec.manifests` (`infra`, `sut`, `monitor`, `load`) are applied.
+3. **Topology Stabilization**: Topology constraints are activated, then Ecoscape waits for `spec.duration.topologyDelay`.
+4. **Load Start**: Load generation begins and the system warms up for `spec.duration.loadDelay`.
+5. **Pre-Chaos Measurement**: Baseline metrics are captured for `spec.duration.chaosDelay`.
+6. **Chaos Injection + Measurement**: Faults from `ChaosPhase` are injected while SLO/SLI data is collected for `spec.duration.measurementDuration`.
+7. **Evaluation**: Prometheus queries in `spec.slos[]` are evaluated and aggregated into experiment results.
+8. **Cleanup / Repeat**: Temporary resources are cleaned up; the run either pauses (`pauseBetweenRepetitions`) and repeats, or finishes.
+
 ## Prerequisites
 
 - Kubernetes cluster (for example Minikube or Kind)
@@ -17,6 +30,23 @@ With Ecoscape, you can run reproducible experiments where a system is observed u
 - Go/Make (for local builds)
 - Installed CRDs + running Ecoscape controller
 - Prometheus + Chaos Mesh in the cluster
+
+## Install from Helm
+
+Install the Ecoscape operator directly from GHCR (OCI registry):
+
+```bash
+helm install ecoscape-operator oci://ghcr.io/henrywedge/charts/ecoscape-operator \
+  --version 0.2.0 \
+  --namespace ecoscape-system \
+  --create-namespace
+```
+
+Uninstall:
+
+```bash
+helm uninstall ecoscape-operator --namespace ecoscape
+```
 
 ## Quick Start
 

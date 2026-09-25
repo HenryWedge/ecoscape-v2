@@ -1,4 +1,4 @@
-# Ecoscape
+# 🌿 Ecoscape
 
 Ecoscape is a benchmark framework for evaluating **remediation strategies in Kubernetes**.
 With Ecoscape, you can run reproducible experiments where a system is observed under load, chaos is injected in a controlled way, and the impact is measured via SLOs/SLIs.

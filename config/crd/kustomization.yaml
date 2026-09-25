@@ -4,6 +4,7 @@
 resources:
 - bases/ecoscape.cau-se.de_experiments.yaml
 - bases/ecoscape.cau-se.de_topologies.yaml
+- bases/ecoscape.cau-se.de_chaosphases.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

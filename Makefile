@@ -381,3 +381,20 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+##@ Helm
+
+CHART_DIR := charts/ecoscape-operator
+
+.PHONY: chart
+chart: ## Copy operator manifests into charts/ecoscape-operator.
+	@mkdir -p "$(CHART_DIR)/crds"
+	@mkdir -p "$(CHART_DIR)/templates"
+	cp config/crd/bases/ecoscape.cau-se.de_experiments.yaml "$(CHART_DIR)/crds/"
+	cp config/crd/bases/ecoscape.cau-se.de_topologies.yaml "$(CHART_DIR)/crds/"
+	cp config/crd/bases/ecoscape.cau-se.de_chaosphases.yaml "$(CHART_DIR)/crds/"
+	cp config/manager/manager.yaml "$(CHART_DIR)/templates/"
+	cp config/rbac/*.yaml "$(CHART_DIR)/templates/"
+	cp config/default/metrics_service.yaml "$(CHART_DIR)/templates/"
+	cp dist/install.yaml "$(CHART_DIR)/install.snapshot.yaml"
+	@echo "Synced chart assets to $(CHART_DIR)"

@@ -30,7 +30,7 @@ data:
         spec:
           containers:
             - name: producer
-              image: ecoscape/edge-producer:latest
+              image: hendrikreiter/edge-data-producer:0.1.0
               imagePullPolicy: IfNotPresent
               env:
                 - name: ZONE
@@ -80,7 +80,7 @@ data:
         spec:
           containers:
             - name: producer
-              image: ecoscape/edge-producer:latest
+              image: hendrikreiter/edge-data-producer:0.1.0
               imagePullPolicy: IfNotPresent
               env:
                 - name: ZONE

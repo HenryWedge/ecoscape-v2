@@ -53,6 +53,9 @@ type ExperimentReconciler struct {
 // +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=experiments/finalizers,verbs=update
 // +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=topologies,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=chaosphases,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=chaosphases/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=ecoscape.cau-se.de,resources=chaosphases/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods;services;endpoints;events;namespaces,verbs=get;list;watch;create;update;patch;delete

@@ -61,6 +61,7 @@ rules:
 - apiGroups:
   - ecoscape.cau-se.de
   resources:
+  - chaosphases
   - experiments
   - topologies
   verbs:
@@ -74,6 +75,7 @@ rules:
 - apiGroups:
   - ecoscape.cau-se.de
   resources:
+  - chaosphases/finalizers
   - experiments/finalizers
   - topologies/finalizers
   verbs:
@@ -81,6 +83,7 @@ rules:
 - apiGroups:
   - ecoscape.cau-se.de
   resources:
+  - chaosphases/status
   - experiments/status
   - topologies/status
   verbs:

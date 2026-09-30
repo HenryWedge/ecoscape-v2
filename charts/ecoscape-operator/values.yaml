@@ -30,3 +30,209 @@ podAnnotations: {}
 
 nameOverride: ""
 fullnameOverride: ""
+
+prometheus:
+  enabled: true
+
+  grafana:
+    enabled: false
+
+  alertmanager:
+    enabled: false
+
+  prometheus:
+    service:
+      type: NodePort
+    prometheusSpec:
+      scrapeInterval: "1s"
+      evaluationInterval: "1s"
+
+      retention: 24h
+
+      storageSpec:
+        emptyDir: {}
+
+      serviceMonitorNamespaceSelector: {}
+      serviceMonitorSelector: {}
+      podMonitorNamespaceSelector: {}
+      podMonitorSelector: {}
+
+      additionalScrapeConfigs:
+        - job_name: "kubernetes-pods"
+          kubernetes_sd_configs:
+            - role: pod
+          relabel_configs:
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+              action: keep
+              regex: "true"
+            - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+              action: replace
+              target_label: __metrics_path__
+              regex: (.+)
+            - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+              action: replace
+              regex: "([^:]+)(?::\\d+)?;(\\d+)"
+              replacement: "$1:$2"
+              target_label: __address__
+            - action: labelmap
+              regex: __meta_kubernetes_pod_label_(.+)
+            - source_labels: [__meta_kubernetes_namespace]
+              action: replace
+              target_label: namespace
+            - source_labels: [__meta_kubernetes_pod_name]
+              action: replace
+              target_label: pod
+
+      resources:
+        requests:
+          cpu: 200m
+          memory: 400Mi
+        limits:
+          cpu: 500m
+          memory: 800Mi
+
+      replicas: 1
+
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+  prometheus-node-exporter:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+
+chaosMesh:
+  enabled: true
+
+  chaosDaemon:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  controllerManager:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  dashboard:
+    enabled: false
+
+  dnsServer:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 100m
+        memory: 64Mi
+
+strimzi:
+  enabled: true
+  replicas: 1
+  watchAnyNamespace: true
+  createGlobalResources: true
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+infraKafka:
+  enabled: true
+  clusters:
+    - name: kafka
+      namespace: object-classifier-two-zone-cloud
+      createNamespace: true
+      version: "4.3.0"
+      metadataVersion: "4.3-IV0"
+      interBrokerProtocolVersion: "4.3"
+      nodePools:
+        broker:
+          name: broker-pool
+          replicas: 1
+          resources:
+            requests:
+              cpu: "300m"
+              memory: "1Gi"
+            limits:
+              cpu: "1000m"
+              memory: "2Gi"
+        controller:
+          name: controller-pool
+          replicas: 1
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "512Mi"
+            limits:
+              cpu: "300m"
+              memory: "768Mi"
+      entityOperator:
+        topicOperator:
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "256Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+        userOperator:
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "256Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+
+kafbat:
+  enabled: true
+  yamlApplicationConfigConfigMap:
+    keyName: config.yml
+    name: ecoscape-kafbat-config
+  replicaCount: 1
+  image:
+    repository: kafbat/kafka-ui
+    tag: v1.5.0
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi

@@ -30,3 +30,8 @@ dependencies:
     repository: "https://grafana.github.io/helm-charts"
     alias: k6operator
     condition: k6operatorEnabled
+  - name: keda
+    version: "2.21.0"
+    repository: "https://kedacore.github.io/charts"
+    alias: kedaOperator
+    condition: kedaOperator.enabled

@@ -88,8 +88,8 @@ prometheus:
           cpu: 200m
           memory: 400Mi
         limits:
-          cpu: 500m
-          memory: 800Mi
+          cpu: 2000m
+          memory: 1500Mi
 
       replicas: 1
 

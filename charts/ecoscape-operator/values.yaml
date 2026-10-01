@@ -183,6 +183,8 @@ infraKafka:
       version: "4.3.0"
       metadataVersion: "4.3-IV0"
       interBrokerProtocolVersion: "4.3"
+      jmxMetrics:
+        enabled: true
       nodePools:
         broker:
           name: broker-pool
@@ -221,6 +223,17 @@ infraKafka:
             limits:
               cpu: "200m"
               memory: "512Mi"
+      kafkaExporter:
+        enabled: true
+        groupRegex: ".*"
+        topicRegex: ".*"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
 
 kafbat:
   enabled: true

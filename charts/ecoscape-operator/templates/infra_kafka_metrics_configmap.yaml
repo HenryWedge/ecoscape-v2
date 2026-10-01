@@ -1,0 +1,33 @@
+{{- if and .Values.strimzi.enabled .Values.infraKafka.enabled .Values.infraKafka.clusters }}
+{{- range $cluster := .Values.infraKafka.clusters }}
+{{- if $cluster.jmxMetrics.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cluster.name }}-kafka-metrics
+  namespace: {{ $cluster.namespace }}
+  labels:
+    {{- include "ecoscape-operator.labels" $ | nindent 4 }}
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+      - pattern: "kafka.server<type=(.+), name=(.+)PerSec\\w*><>Count"
+        name: kafka_server_$1_$2_total
+      - pattern: "kafka.server<type=(.+), name=(.+)PerSec\\w*><>(\\w+)"
+        name: kafka_server_$1_$2
+        type: GAUGE
+      - pattern: "kafka.server<type=(.+), name=(.+)><>(\\w+)"
+        name: kafka_server_$1_$2
+        type: GAUGE
+      - pattern: "kafka.network<type=(.+), name=(.+)><>(\\w+)"
+        name: kafka_network_$1_$2
+        type: GAUGE
+      - pattern: "kafka.log<type=(.+), name=(.+)><>(\\w+)"
+        name: kafka_log_$1_$2
+        type: GAUGE
+{{- end }}
+{{- end }}
+{{- end }}

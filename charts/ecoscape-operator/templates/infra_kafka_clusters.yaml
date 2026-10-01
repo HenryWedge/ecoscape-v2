@@ -64,6 +64,12 @@ spec:
           runAsGroup: 1001
           fsGroup: 1001
           fsGroupChangePolicy: OnRootMismatch
+{{- if $cluster.jmxMetrics.enabled }}
+        metadata:
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9404"
+{{- end }}
     listeners:
       - name: plain
         port: 9092
@@ -76,6 +82,14 @@ spec:
       default.replication.factor: 1
       min.insync.replicas: 1
       inter.broker.protocol.version: {{ $cluster.interBrokerProtocolVersion | quote }}
+{{- if $cluster.jmxMetrics.enabled }}
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: {{ $cluster.name }}-kafka-metrics
+          key: kafka-metrics-config.yml
+{{- end }}
   entityOperator:
     topicOperator:
       resources:
@@ -83,5 +97,18 @@ spec:
     userOperator:
       resources:
         {{- toYaml $cluster.entityOperator.userOperator.resources | nindent 8 }}
+{{- if $cluster.kafkaExporter.enabled }}
+  kafkaExporter:
+    groupRegex: {{ $cluster.kafkaExporter.groupRegex | quote }}
+    topicRegex: {{ $cluster.kafkaExporter.topicRegex | quote }}
+    resources:
+      {{- toYaml $cluster.kafkaExporter.resources | nindent 6 }}
+    template:
+      pod:
+        metadata:
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9404"
+{{- end }}
 {{- end }}
 {{- end }}

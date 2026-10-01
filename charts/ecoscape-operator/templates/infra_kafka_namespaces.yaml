@@ -1,0 +1,13 @@
+{{- if and .Values.strimzi.enabled .Values.infraKafka.enabled .Values.infraKafka.clusters }}
+{{- range $cluster := .Values.infraKafka.clusters }}
+{{- if $cluster.createNamespace }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $cluster.namespace }}
+  labels:
+    {{- include "ecoscape-operator.labels" $ | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}

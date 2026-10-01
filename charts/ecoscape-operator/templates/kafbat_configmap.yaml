@@ -1,0 +1,19 @@
+{{- if and .Values.kafbat.enabled .Values.infraKafka.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecoscape-kafbat-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "ecoscape-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: kafbat
+data:
+  config.yml: |
+    kafka:
+      clusters:
+{{- range .Values.infraKafka.clusters }}
+        - name: {{ .name | quote }}
+          bootstrapServers: {{ printf "%s-kafka-bootstrap.%s.svc:9092" .name .namespace | quote }}
+{{- end }}
+{{- end }}

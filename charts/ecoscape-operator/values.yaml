@@ -168,6 +168,12 @@ strimzi:
       cpu: 500m
       memory: 512Mi
 
+k6operatorEnabled: true
+
+k6operator:
+  namespace:
+    create: false
+
 infraKafka:
   enabled: true
   clusters:

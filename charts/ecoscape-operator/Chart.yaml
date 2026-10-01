@@ -25,3 +25,8 @@ dependencies:
     repository: "https://ui.charts.kafbat.io/"
     alias: kafbat
     condition: kafbat.enabled
+  - name: k6-operator
+    version: "4.6.0"
+    repository: "https://grafana.github.io/helm-charts"
+    alias: k6operator
+    condition: k6operatorEnabled

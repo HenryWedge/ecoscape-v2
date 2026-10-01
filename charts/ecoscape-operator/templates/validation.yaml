@@ -1,0 +1,9 @@
+{{- if and .Values.infraKafka.enabled (not .Values.strimzi.enabled) -}}
+{{- fail "values error: infraKafka.enabled=true requires strimzi.enabled=true" -}}
+{{- end -}}
+{{- if and .Values.kafbat.enabled (not .Values.infraKafka.enabled) -}}
+{{- fail "values error: kafbat.enabled=true requires infraKafka.enabled=true because bootstrap servers are generated from infraKafka.clusters" -}}
+{{- end -}}
+{{- if and .Values.kafbat.enabled (eq (len .Values.infraKafka.clusters) 0) -}}
+{{- fail "values error: kafbat.enabled=true requires at least one entry in infraKafka.clusters" -}}
+{{- end -}}

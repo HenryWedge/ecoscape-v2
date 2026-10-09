@@ -2,7 +2,8 @@
 
 A finite-file PyFlink pipeline uses PM4Py for process discovery and conformance
 checking. Discovery and conformance checking run in separate branches of the
-same Flink job and are synchronized by event sequence numbers.
+same Flink job. Model updates are applied in arrival order without synchronizing
+the branches by event sequence.
 
 ## Input
 
@@ -24,21 +25,17 @@ case-2,Register,2026-10-08T09:06:00Z
 - Filter activity labels from each discovery window using their estimated
   frequencies before mining.
 - Mine a process model from each completed window using the Heuristics Miner.
-- Emit model updates with a version and the sequence number of the window's
-  final event, and emit a progress marker after every input event.
-- The conformance branch buffers events until discovery has reported progress
-  past them, ensuring applicable model updates are known before processing.
-- A model update is available only to events after the window's final event.
-  Each case is pinned to the latest applicable model when its first event is
-  processed.
-- Cases first observed before the first model is mined are pinned to that first
-  model when it becomes available.
+- Emit each model update with a version.
 
 ## Conformance checking
 
-- Count events globally in independent tumbling windows of 10 events.
+- Treat events processed before the first model update as a learning phase and
+  drop them from conformance checking.
+- Count accepted events globally in independent tumbling windows of 10 events.
 - Retain each case's full activity trace and recalculate its prefix alignment
   cost whenever a conformance window completes.
+- Pin each case to the model that is current when its first accepted event is
+  processed. Later model updates do not change that trace's model.
 - Emit one JSON array per completed conformance window with an entry for every
   case seen so far, for example:
 
@@ -46,22 +43,14 @@ case-2,Register,2026-10-08T09:06:00Z
   [{"case":"case-1","score":0},{"case":"case-2","score":3}]
   ```
 
-- Emit no score output before a model has been mined. Alignment uses unit cost
+- Emit no score output before the first model update. Alignment uses unit cost
   for log and model moves and zero cost for synchronous moves.
-- Cases have no completion event; traces and model versions are retained in
+- Cases have no completion event. Traces and model versions are retained in
   managed state for the duration of the job.
 - Incomplete final discovery and conformance windows are not processed.
-
-Discovery and conformance use separate keyed operators in one job. Each input
-event receives a sequence number after timestamp sorting. Discovery emits a
-progress record for every event and versioned model records at discovery-window
-boundaries. Conformance buffers events until discovery has advanced past them,
-then applies model updates whose boundary precedes the event sequence. Both
-branches use a global key and parallelism 1. Discovery models travel to
-conformance as base64-encoded serialized model control records and are restored
-into managed conformance state. Model payloads are nested in JSON control
-records, so PyFlink's Java stream serializer handles only strings and primitive
-event dictionaries.
+- Discovery and conformance are not synchronized by event sequence. The model
+  current when an event is processed by conformance depends on the arrival order
+  of events and model updates.
 
 ## State and delivery
 

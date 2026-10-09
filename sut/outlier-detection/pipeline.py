@@ -31,7 +31,6 @@ def _serialize_model(model):
 
 
 
-
 def read_ordered_events(input_path):
     events = []
     with open(input_path, newline="", encoding="utf-8") as input_file:
@@ -107,8 +106,7 @@ class DiscoveryOperator(KeyedProcessFunction):
 
         _apply_lossy_counting(state, event["activity"], self.max_approx_error)
         state["discovery_events"].append(event)
-        sequence = event["sequence"]
-        controls = []
+        model_update = None
 
         if len(state["discovery_events"]) == DISCOVERY_WINDOW_SIZE:
             _finish_lossy_counting_window(state, self.max_approx_error)
@@ -126,28 +124,20 @@ class DiscoveryOperator(KeyedProcessFunction):
                     "initial_marking": model[1],
                     "final_marking": model[2],
                 }
-                controls.append(json.dumps(
+                model_update = json.dumps(
                     {
-                        "type": "model",
                         "version": state["model_version"],
-                        "effective_after": sequence,
                         "model": _serialize_model(model_snapshot),
                     },
                     separators=(",", ":"),
-                ))
+                )
             state["discovery_events"] = []
             state["discovery_event_count"] = 0
             state["discovery_lossy_counts"] = {}
 
         self.discovery_state.update(pickle.dumps(state))
-        # The progress marker lets conformance wait for discovery's decision at
-        # each model boundary, even when the branches execute at different speeds.
-        controls.append(
-            json.dumps(
-                {"type": "progress", "sequence": sequence}, separators=(",", ":")
-            )
-        )
-        yield from controls
+        if model_update is not None:
+            yield model_update
 
 
 class ConformanceOperator(KeyedCoProcessFunction):
@@ -167,23 +157,20 @@ class ConformanceOperator(KeyedCoProcessFunction):
         yield from results
 
     def process_element2(self, control, context):
-        control = json.loads(control)
         state = ConformanceState.from_bytes(self.conformance_state.value())
-        results = state.apply_control(control)
+        state.add_model(json.loads(control))
         self.conformance_state.update(state.to_bytes())
-        yield from results
 
 
 def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
     events = read_ordered_events(input_path)
     serializable_events = [
         {
-            "sequence": sequence,
             "case": event["case"],
             "activity": event["activity"],
             "timestamp": event["timestamp"].isoformat(),
         }
-        for sequence, event in enumerate(events, start=1)
+        for event in events
     ]
     configuration = Configuration()
     configuration.set_string("state.backend.type", "hashmap")

@@ -21,17 +21,17 @@ class ConformanceState:
     def add_window(self, events):
         updated_cases = set()
         for event in events:
-            if "model_update" in event:
-                self.add_model(event["model_update"])
+            if event.model_update is not None:
+                self.add_model(event.model_update)
 
-            model_version = event["model_version"]
-            case = event["case"]
+            model_version = event.model_version
+            case = event.case
             if case not in self.traces:
                 self.traces[case] = {
                     "activities": [],
                     "model_version": model_version,
                 }
-            self.traces[case]["activities"].append(event["activity"])
+            self.traces[case]["activities"].append(event.activity)
             updated_cases.add(case)
 
         scores = []
@@ -49,8 +49,8 @@ class ConformanceState:
             json.dumps(
                 {
                     "window": {
-                        "first_event": events[0]["sequence"],
-                        "last_event": events[-1]["sequence"],
+                        "first_event": events[0].sequence,
+                        "last_event": events[-1].sequence,
                     },
                     "scores": scores,
                 },
@@ -59,5 +59,4 @@ class ConformanceState:
         ]
 
     def add_model(self, model_update):
-        version = model_update["version"]
-        self.models[version] = self._deserialize_model(model_update["model"])
+        self.models[model_update.version] = self._deserialize_model(model_update.model)

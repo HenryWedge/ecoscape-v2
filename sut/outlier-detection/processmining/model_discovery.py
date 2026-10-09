@@ -3,7 +3,6 @@ from pm4py.objects.log.obj import Event, EventLog, Trace
 from datetime import datetime
 
 class ModelDiscovery:
-
     def discover_heuristics_miner(self, events):
         traces_by_case = {}
         for event in events:

@@ -1,9 +1,8 @@
 # Conformance Checking Outlier Detection
 
 A finite-file PyFlink pipeline uses PM4Py for process discovery and conformance
-checking. Discovery and conformance checking run in separate branches of the
-same Flink job. Model updates are applied in arrival order without synchronizing
-the branches by event sequence.
+checking. Discovery and conformance checking run in one ordered pipeline, so
+each discovery window is processed before the following window.
 
 ## Input
 
@@ -20,7 +19,10 @@ case-2,Register,2026-10-08T09:06:00Z
 
 ## Process discovery
 
-- Count events globally in independent tumbling windows of 30 events.
+- Count events globally in independent tumbling windows of 30 events using
+  Flink's count-window operator.
+- Use the first complete discovery window as the learning phase. Its events are
+  not scored; its model is applied starting with the next discovery window.
 - Apply lossy-counting filtering with `max_approx_error` (default `0.05`).
 - Filter activity labels from each discovery window using their estimated
   frequencies before mining.
@@ -29,28 +31,28 @@ case-2,Register,2026-10-08T09:06:00Z
 
 ## Conformance checking
 
-- Treat events processed before the first model update as a learning phase and
-  drop them from conformance checking.
-- Count accepted events globally in independent tumbling windows of 10 events.
-- Retain each case's full activity trace and recalculate its prefix alignment
-  cost whenever a conformance window completes.
-- Pin each case to the model that is current when its first accepted event is
-  processed. Later model updates do not change that trace's model.
-- Emit one JSON array per completed conformance window with an entry for every
-  case seen so far, for example:
+- Score only events in complete discovery windows after the learning phase.
+- Count accepted events globally in independent tumbling windows of 10 events
+  using Flink's count-window operator.
+- Retain each case's full activity trace and recalculate its cumulative prefix
+  alignment cost whenever a conformance window completes.
+- Pin each case to the model attached to its first accepted event. Later model
+  updates do not change that trace's model.
+- Emit one JSON object per completed conformance window, with scores only for
+  cases that had accepted events in that window. For example:
 
   ```json
-  [{"case":"case-1","score":0},{"case":"case-2","score":3}]
+  {"window":{"first_event":30,"last_event":39},"scores":[{"case":"case-1","score":0},{"case":"case-2","score":3}]}
   ```
 
-- Emit no score output before the first model update. Alignment uses unit cost
-  for log and model moves and zero cost for synchronous moves.
+- Alignment uses unit cost for log and model moves and zero cost for synchronous
+  moves.
 - Cases have no completion event. Traces and model versions are retained in
   managed state for the duration of the job.
-- Incomplete final discovery and conformance windows are not processed.
-- Discovery and conformance are not synchronized by event sequence. The model
-  current when an event is processed by conformance depends on the arrival order
-  of events and model updates.
+- Incomplete final discovery and conformance windows are not processed by their
+  respective window functions.
+- The model learned from a discovery window is used starting with the next
+  discovery window. Model and event ordering is therefore deterministic.
 
 ## State and delivery
 
@@ -70,7 +72,8 @@ python pipeline.py --input input.csv --output output \
 ```
 
 Optional arguments include `--max-approx-error` (default `0.05`). The sample
-`input.csv` contains enough events for complete discovery and conformance
-windows.
+`input.csv` has 58 events, so it does not contain a complete second discovery
+window and produces no scores. At least 60 events are needed for one complete
+scored discovery window after the initial learning window.
 The pipeline targets `apache-flink==2.3.0` and configures the HashMap state
 backend and checkpoint directory through Flink's `Configuration` API.

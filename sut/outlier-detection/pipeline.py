@@ -23,10 +23,14 @@ from pyflink.datastream.functions import (
     WindowFunction,
     MapFunction,
 )
+from pyflink.datastream.output_tag import OutputTag
 from pyflink.datastream.state import MapStateDescriptor, ValueStateDescriptor
 
 DISCOVERY_WINDOW_SIZE = 10
 DEFAULT_MAX_APPROX_ERROR = 0.05
+MODEL_UPDATE_OUTPUT_TAG = OutputTag(
+    "model-updates", Types.PICKLED_BYTE_ARRAY()
+)
 
 
 def _serialize_model(model):
@@ -127,9 +131,9 @@ class DiscoverAndTagWindowOperator(KeyedProcessFunction):
             )
 
         for tagged_event in tagged_events:
-            yield ("event", tagged_event)
+            yield tagged_event
         if directly_follows_data is not None:
-            yield ("model", model_update)
+            yield MODEL_UPDATE_OUTPUT_TAG, model_update
 
 
 class ConformanceOperator(KeyedBroadcastProcessFunction):
@@ -194,6 +198,24 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
         )
 
 
+class CollectLatestScoresOperator(KeyedProcessFunction):
+    def open(self, runtime_context):
+        descriptor = MapStateDescriptor(
+            "latest-scores", Types.STRING(), Types.STRING()
+        )
+        self.latest_scores = runtime_context.get_map_state(descriptor)
+
+    def process_element(self, score_json, context):
+        score = json.loads(score_json)
+        self.latest_scores.put(score["case"], score_json)
+
+        scores = [
+            json.loads(self.latest_scores.get(case))
+            for case in sorted(self.latest_scores.keys())
+        ]
+        yield json.dumps({"scores": scores}, separators=(",", ":"))
+
+
 def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
     events = FileInput().read_ordered_events(input_path)
     event_data = [
@@ -227,30 +249,29 @@ def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
         DiscoverAndTagWindowOperator(),
         output_type=Types.PICKLED_BYTE_ARRAY(),
     )
-    accepted_events = discovery_outputs.filter(
-        lambda output: output[0] == "event"
-    ).map(
-        lambda output: output[1],
-        output_type=Types.PICKLED_BYTE_ARRAY(),
-    )
-    model_updates = discovery_outputs.filter(
-        lambda output: output[0] == "model"
-    ).map(
-        lambda output: output[1],
-        output_type=Types.PICKLED_BYTE_ARRAY(),
-    )
+
+    accepted_events = discovery_outputs
+    model_updates = discovery_outputs.get_side_output(MODEL_UPDATE_OUTPUT_TAG)
     models_descriptor = MapStateDescriptor(
         "discovered-models", Types.INT(), Types.STRING()
     )
     latest_model_descriptor = MapStateDescriptor(
         "latest-model-version", Types.STRING(), Types.INT()
     )
+
     scores = accepted_events.key_by(
         lambda event: event.case, key_type=Types.STRING()
     ).connect(
         model_updates.broadcast(models_descriptor, latest_model_descriptor)
     ).process(
         ConformanceOperator(models_descriptor, latest_model_descriptor),
+        output_type=Types.STRING(),
+    )
+
+    cumulative_scores = scores.key_by(
+        lambda _score: "global", key_type=Types.STRING()
+    ).process(
+        CollectLatestScoresOperator(),
         output_type=Types.STRING(),
     )
 
@@ -265,7 +286,7 @@ def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
         .with_output_file_config(output_file_config)
         .build()
     )
-    scores.sink_to(sink)
+    cumulative_scores.sink_to(sink)
     environment.execute("conformance-checking-outlier-detection")
 
 

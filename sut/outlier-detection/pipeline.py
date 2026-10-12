@@ -143,13 +143,13 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
         self.models = {}
 
     def open(self, runtime_context):
-        activities_descriptor = ValueStateDescriptor(
-            "case-activities", Types.PICKLED_BYTE_ARRAY()
+        alignment_state_descriptor = ValueStateDescriptor(
+            "case-prefix-alignment", Types.PICKLED_BYTE_ARRAY()
         )
         model_version_descriptor = ValueStateDescriptor(
             "case-model-version", Types.INT()
         )
-        self.activities_state = runtime_context.get_state(activities_descriptor)
+        self.alignment_state = runtime_context.get_state(alignment_state_descriptor)
         self.model_version_state = runtime_context.get_state(model_version_descriptor)
 
     def process_broadcast_element(self, model_update, context):
@@ -173,10 +173,6 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
                 )
             self.model_version_state.update(model_version)
 
-        activities = self.activities_state.value() or []
-        activities.append(event.activity)
-        self.activities_state.update(activities)
-
         encoded_model = context.get_broadcast_state(self.models_descriptor).get(
             model_version
         )
@@ -189,9 +185,14 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
                 base64.b64decode(encoded_model)
             )
 
-        score = ConformanceChecker().calculate_alignment_cost(
-            activities, self.models[model_version]
-        )
+        alignment_state = self.alignment_state.value()
+        if alignment_state is None:
+            alignment_state = ConformanceChecker().create_prefix_alignment_state(
+                event.case, self.models[model_version]
+            )
+
+        score = alignment_state.add_event(event.activity)
+        self.alignment_state.update(alignment_state)
         yield json.dumps(
             {"case": event.case, "event": event.sequence, "score": score},
             separators=(",", ":"),

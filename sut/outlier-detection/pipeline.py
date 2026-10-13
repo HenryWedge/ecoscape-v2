@@ -26,7 +26,7 @@ from pyflink.datastream.functions import (
 from pyflink.datastream.output_tag import OutputTag
 from pyflink.datastream.state import MapStateDescriptor, ValueStateDescriptor
 
-DISCOVERY_WINDOW_SIZE = 10
+DISCOVERY_WINDOW_SIZE = 20
 DEFAULT_MAX_APPROX_ERROR = 0.05
 MODEL_UPDATE_OUTPUT_TAG = OutputTag(
     "model-updates", Types.PICKLED_BYTE_ARRAY()
@@ -217,77 +217,65 @@ class CollectLatestScoresOperator(KeyedProcessFunction):
         yield json.dumps({"scores": scores}, separators=(",", ":"))
 
 
-def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
-    events = FileInput().read_ordered_events(input_path)
-    event_data = [
-        (event.case, event.activity, event.timestamp, event.sequence)
-        for event in events
-    ]
+def _get_configuration(checkpoint_dir):
     configuration = Configuration()
     configuration.set_string("state.backend.type", "hashmap")
     configuration.set_string("execution.checkpointing.dir", checkpoint_dir)
+    return configuration
+
+def _get_environment(configuration):
     environment = StreamExecutionEnvironment.get_execution_environment(configuration)
     environment.set_parallelism(4)
     environment.set_runtime_mode(RuntimeExecutionMode.STREAMING)
     environment.enable_checkpointing(10_000, CheckpointingMode.EXACTLY_ONCE)
+    return environment
 
-    source = environment.from_collection(event_data).set_parallelism(1).map(
-        CreateProcessEventOperator(),
-        output_type=Types.PICKLED_BYTE_ARRAY(),
-    ).set_parallelism(1)
-
-    keyed_source = source.key_by(lambda _event: "global", key_type=Types.STRING())
-
-    directly_follows_windows = keyed_source.count_window(
-        DISCOVERY_WINDOW_SIZE
-    ).apply(
-        CreateDirectlyFollowsWindowOperator(max_approx_error),
-        output_type=Types.PICKLED_BYTE_ARRAY(),
-    )
-    discovery_outputs = directly_follows_windows.key_by(
-        lambda _window: "global", key_type=Types.STRING()
-    ).process(
-        DiscoverAndTagWindowOperator(),
-        output_type=Types.PICKLED_BYTE_ARRAY(),
-    )
-
-    accepted_events = discovery_outputs
-    model_updates = discovery_outputs.get_side_output(MODEL_UPDATE_OUTPUT_TAG)
-    models_descriptor = MapStateDescriptor(
-        "discovered-models", Types.INT(), Types.STRING()
-    )
-    latest_model_descriptor = MapStateDescriptor(
-        "latest-model-version", Types.STRING(), Types.INT()
-    )
-
-    scores = accepted_events.key_by(
-        lambda event: event.case, key_type=Types.STRING()
-    ).connect(
-        model_updates.broadcast(models_descriptor, latest_model_descriptor)
-    ).process(
-        ConformanceOperator(models_descriptor, latest_model_descriptor),
-        output_type=Types.STRING(),
-    )
-
-    cumulative_scores = scores.key_by(
-        lambda _score: "global", key_type=Types.STRING()
-    ).process(
-        CollectLatestScoresOperator(),
-        output_type=Types.STRING(),
-    )
-
+def _get_sink(output_path):
     output_file_config = (
         OutputFileConfig.builder()
         .with_part_prefix("scores")
         .with_part_suffix(".jsonl")
         .build()
     )
-    sink = (
+    return (
         FileSink.for_row_format(output_path, Encoder.simple_string_encoder("UTF-8"))
         .with_output_file_config(output_file_config)
         .build()
     )
-    cumulative_scores.sink_to(sink)
+
+def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
+    events = FileInput().read_ordered_events(input_path)
+    event_data = [
+        (event.case, event.activity, event.timestamp, event.sequence)
+        for event in events
+    ]
+    configuration = _get_configuration(checkpoint_dir)
+    environment = _get_environment(configuration)
+
+    discovery_results = (
+        environment.from_collection(event_data)
+        .set_parallelism(1)
+        .map(CreateProcessEventOperator(), output_type=Types.PICKLED_BYTE_ARRAY())
+        .key_by(lambda _event: "global", key_type=Types.STRING())
+        .count_window(DISCOVERY_WINDOW_SIZE)
+        .apply(CreateDirectlyFollowsWindowOperator(max_approx_error), output_type=Types.PICKLED_BYTE_ARRAY())
+        .key_by(lambda _window: "global", key_type=Types.STRING())
+        .process(DiscoverAndTagWindowOperator(), output_type=Types.PICKLED_BYTE_ARRAY())
+    )
+
+    model_updates = discovery_results.get_side_output(MODEL_UPDATE_OUTPUT_TAG)
+    models_descriptor = MapStateDescriptor("discovered-models", Types.INT(), Types.STRING())
+    latest_model_descriptor = MapStateDescriptor("latest-model-version", Types.STRING(), Types.INT())
+
+    (
+        discovery_results
+        .key_by(lambda event: event.case, key_type=Types.STRING())
+        .connect(model_updates.broadcast(models_descriptor, latest_model_descriptor))
+        .process(ConformanceOperator(models_descriptor, latest_model_descriptor), output_type=Types.STRING())
+        .key_by(lambda _score: "global", key_type=Types.STRING())
+        .process(CollectLatestScoresOperator(), output_type=Types.STRING())
+        .sink_to(_get_sink(output_path))
+    )
     environment.execute("conformance-checking-outlier-detection")
 
 

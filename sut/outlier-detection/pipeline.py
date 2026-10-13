@@ -11,8 +11,9 @@ from processmining.conformance_checker import ConformanceChecker
 from processmining.input import FileInput
 from processmining.data_models import DiscoveredModel, DiscoveryWindow, ProcessEvent
 
-from pyflink.common import Configuration, Types
+from pyflink.common import Configuration, Types, WatermarkStrategy, Time, Duration
 from pyflink.common.serialization import Encoder
+from pyflink.common.watermark_strategy import TimestampAssigner
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.checkpointing_mode import CheckpointingMode
 from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig
@@ -24,7 +25,11 @@ from pyflink.datastream.functions import (
     MapFunction,
 )
 from pyflink.datastream.output_tag import OutputTag
-from pyflink.datastream.state import MapStateDescriptor, ValueStateDescriptor
+from pyflink.datastream.state import (
+    ListStateDescriptor,
+    MapStateDescriptor,
+    ValueStateDescriptor,
+)
 
 DISCOVERY_WINDOW_SIZE = 20
 DEFAULT_MAX_APPROX_ERROR = 0.05
@@ -32,45 +37,13 @@ MODEL_UPDATE_OUTPUT_TAG = OutputTag(
     "model-updates", Types.PICKLED_BYTE_ARRAY()
 )
 
-
-def _serialize_model(model):
-    return base64.b64encode(pickle.dumps(model)).decode("ascii")
-
-def _filter_discovery_events(events, max_approx_error):
-    width = math.ceil(1.0 / max_approx_error)
-    counts = {}
-    for event_number, event in enumerate(events, start=1):
-        bucket = math.ceil(event_number / width)
-        activity = event.activity
-        if activity in counts:
-            counts[activity][0] += 1
-        else:
-            counts[activity] = [1, bucket - 1]
-
-        if event_number % width == 0:
-            counts = {
-                name: counter
-                for name, counter in counts.items()
-                if counter[0] + counter[1] > bucket
-            }
-
-    final_bucket = math.ceil(len(events) / width)
-    counts = {
-        name: counter
-        for name, counter in counts.items()
-        if counter[0] + counter[1] > final_bucket
-    }
-    retained_activities = set(counts)
-    return [event for event in events if event.activity in retained_activities]
-
-
 class CreateDirectlyFollowsWindowOperator(WindowFunction):
     def __init__(self, max_approx_error):
         self.max_approx_error = max_approx_error
 
     def apply(self, key, window, events):
-        events = list(events)
-        filtered_events = _filter_discovery_events(events, self.max_approx_error)
+        events = sorted(events, key=lambda event: event.timestamp)
+        filtered_events = self._filter_discovery_events(events, self.max_approx_error)
         directly_follows_data = None
         if filtered_events:
             directly_follows_data = ModelDiscovery().create_directly_follows_data(
@@ -81,10 +54,37 @@ class CreateDirectlyFollowsWindowOperator(WindowFunction):
             directly_follows_data=directly_follows_data,
         )
 
+    def _filter_discovery_events(self, events, max_approx_error):
+        width = math.ceil(1.0 / max_approx_error)
+        counts = {}
+        for event_number, event in enumerate(events, start=1):
+            bucket = math.ceil(event_number / width)
+            activity = event.activity
+            if activity in counts:
+                counts[activity][0] += 1
+            else:
+                counts[activity] = [1, bucket - 1]
+
+            if event_number % width == 0:
+                counts = {
+                    name: counter
+                    for name, counter in counts.items()
+                    if counter[0] + counter[1] > bucket
+                }
+        final_bucket = math.ceil(len(events) / width)
+        counts = {
+            name: counter
+            for name, counter in counts.items()
+            if counter[0] + counter[1] > final_bucket
+        }
+        retained_activities = set(counts)
+        return [event for event in events if event.activity in retained_activities]
+
 
 class CreateProcessEventOperator(MapFunction):
     def map(self, event_data):
         case, activity, timestamp, sequence = event_data
+        print(f"Before key_by: sequence={sequence}, case={case}")
         return ProcessEvent(
             case=case,
             activity=activity,
@@ -98,18 +98,23 @@ class DiscoverAndTagWindowOperator(KeyedProcessFunction):
         descriptor = ValueStateDescriptor("current-discovery-model", Types.STRING())
         self.current_discovery_model = runtime_context.get_state(descriptor)
 
+    def _serialize_model(self, model):
+        return base64.b64encode(pickle.dumps(model)).decode("ascii")
+
     def process_element(self, discovery_window, context):
         events = discovery_window.events
         current_model_json = self.current_discovery_model.value()
         tagged_events = []
 
         if current_model_json is not None:
+            current_model_version = json.loads(current_model_json)["version"]
             for event in events:
                 tagged_event = ProcessEvent(
                     case=event.case,
                     activity=event.activity,
                     timestamp=event.timestamp,
                     sequence=event.sequence,
+                    model_version=current_model_version,
                 )
                 tagged_events.append(tagged_event)
 
@@ -118,7 +123,7 @@ class DiscoverAndTagWindowOperator(KeyedProcessFunction):
             model = ModelDiscovery().discover_heuristics_miner(directly_follows_data)
             model_update = DiscoveredModel(
                 version=events[-1].sequence // DISCOVERY_WINDOW_SIZE + 1,
-                model=_serialize_model(
+                model=self._serialize_model(
                     {
                         "net": model[0],
                         "initial_marking": model[1],
@@ -137,9 +142,8 @@ class DiscoverAndTagWindowOperator(KeyedProcessFunction):
 
 
 class ConformanceOperator(KeyedBroadcastProcessFunction):
-    def __init__(self, models_descriptor, latest_model_descriptor):
+    def __init__(self, models_descriptor):
         self.models_descriptor = models_descriptor
-        self.latest_model_descriptor = latest_model_descriptor
         self.models = {}
 
     def open(self, runtime_context):
@@ -149,54 +153,65 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
         model_version_descriptor = ValueStateDescriptor(
             "case-model-version", Types.INT()
         )
+        pending_events_descriptor = ListStateDescriptor(
+            "pending-conformance-events", Types.PICKLED_BYTE_ARRAY()
+        )
         self.alignment_state = runtime_context.get_state(alignment_state_descriptor)
         self.model_version_state = runtime_context.get_state(model_version_descriptor)
+        self.pending_events = runtime_context.get_list_state(
+            pending_events_descriptor
+        )
 
     def process_broadcast_element(self, model_update, context):
         context.get_broadcast_state(self.models_descriptor).put(
             model_update.version, model_update.model
         )
-        context.get_broadcast_state(self.latest_model_descriptor).put(
-            "latest", model_update.version
-        )
         self.models.pop(model_update.version, None)
 
-    def process_element(self, event, context):
-        model_version = self.model_version_state.value()
-        if model_version is None:
-            model_version = context.get_broadcast_state(
-                self.latest_model_descriptor
-            ).get("latest")
-            if model_version is None:
-                raise RuntimeError(
-                    "No discovered model is available for conformance checking"
-                )
-            self.model_version_state.update(model_version)
-
-        encoded_model = context.get_broadcast_state(self.models_descriptor).get(
-            model_version
-        )
+    def _get_model(self, model_version, context):
         if model_version not in self.models:
+            encoded_model = context.get_broadcast_state(self.models_descriptor).get(
+                model_version
+            )
             if encoded_model is None:
-                raise RuntimeError(
-                    f"Discovered model {model_version} is not available"
-                )
+                return None
             self.models[model_version] = pickle.loads(
                 base64.b64decode(encoded_model)
             )
+        return self.models[model_version]
 
+    def _score_event(self, event, model):
         alignment_state = self.alignment_state.value()
         if alignment_state is None:
             alignment_state = ConformanceChecker().create_prefix_alignment_state(
-                event.case, self.models[model_version]
+                event.case, model
             )
 
         score = alignment_state.add_event(event.activity)
         self.alignment_state.update(alignment_state)
-        yield json.dumps(
+        print(event.sequence)
+        return json.dumps(
             {"case": event.case, "event": event.sequence, "score": score},
             separators=(",", ":"),
         )
+
+    def process_element(self, event, context):
+        model_version = self.model_version_state.value()
+        if model_version is None:
+            model_version = event.model_version
+            if model_version is None:
+                return
+            self.model_version_state.update(model_version)
+
+        self.pending_events.add(event)
+        model = self._get_model(model_version, context)
+        if model is None:
+            return
+
+        pending_events = list(self.pending_events.get())
+        self.pending_events.clear()
+        for event in pending_events:
+            yield self._score_event(event, model)
 
 
 class CollectLatestScoresOperator(KeyedProcessFunction):
@@ -225,7 +240,7 @@ def _get_configuration(checkpoint_dir):
 
 def _get_environment(configuration):
     environment = StreamExecutionEnvironment.get_execution_environment(configuration)
-    environment.set_parallelism(4)
+    environment.set_parallelism(1)
     environment.set_runtime_mode(RuntimeExecutionMode.STREAMING)
     environment.enable_checkpointing(10_000, CheckpointingMode.EXACTLY_ONCE)
     return environment
@@ -243,6 +258,10 @@ def _get_sink(output_path):
         .build()
     )
 
+class EventTimestampAssigner(TimestampAssigner):
+    def extract_timestamp(self, value, record_timestamp) -> int:
+        return int(value[2].timestamp())
+
 def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
     events = FileInput().read_ordered_events(input_path)
     event_data = [
@@ -252,9 +271,15 @@ def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
     configuration = _get_configuration(checkpoint_dir)
     environment = _get_environment(configuration)
 
+    watermark_strategy = (
+        WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10))
+        .with_timestamp_assigner(EventTimestampAssigner())
+    )
+
     discovery_results = (
         environment.from_collection(event_data)
-        .set_parallelism(1)
+        .assign_timestamps_and_watermarks(watermark_strategy)
+        .key_by(lambda _event: _event[0])
         .map(CreateProcessEventOperator(), output_type=Types.PICKLED_BYTE_ARRAY())
         .key_by(lambda _event: "global", key_type=Types.STRING())
         .count_window(DISCOVERY_WINDOW_SIZE)
@@ -265,13 +290,13 @@ def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
 
     model_updates = discovery_results.get_side_output(MODEL_UPDATE_OUTPUT_TAG)
     models_descriptor = MapStateDescriptor("discovered-models", Types.INT(), Types.STRING())
-    latest_model_descriptor = MapStateDescriptor("latest-model-version", Types.STRING(), Types.INT())
 
     (
         discovery_results
+        .set_parallelism(4)
         .key_by(lambda event: event.case, key_type=Types.STRING())
-        .connect(model_updates.broadcast(models_descriptor, latest_model_descriptor))
-        .process(ConformanceOperator(models_descriptor, latest_model_descriptor), output_type=Types.STRING())
+        .connect(model_updates.broadcast(models_descriptor))
+        .process(ConformanceOperator(models_descriptor), output_type=Types.STRING())
         .key_by(lambda _score: "global", key_type=Types.STRING())
         .process(CollectLatestScoresOperator(), output_type=Types.STRING())
         .sink_to(_get_sink(output_path))

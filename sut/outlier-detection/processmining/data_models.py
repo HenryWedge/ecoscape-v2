@@ -32,3 +32,10 @@ class DirectlyFollowsData:
 class DiscoveryWindow:
     events: list[ProcessEvent]
     directly_follows_data: DirectlyFollowsData | None
+
+
+@dataclass
+class CaseConformanceState:
+    model_version: int
+    alignment_state: object | None
+    pending_events: list[ProcessEvent]

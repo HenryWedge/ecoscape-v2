@@ -7,6 +7,7 @@ from datetime import datetime
 class DiscoveredModel:
     version: int
     model: str
+    timestamp: int
 
 
 @dataclass

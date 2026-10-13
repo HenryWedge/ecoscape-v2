@@ -2,10 +2,10 @@
 
 import argparse
 import base64
+import hashlib
 import json
 import math
 import pickle
-import time
 from pathlib import Path
 from processmining.model_discovery import ModelDiscovery
 from processmining.conformance_checker import ConformanceChecker
@@ -33,18 +33,23 @@ from pyflink.datastream.functions import (
 from pyflink.datastream.output_tag import OutputTag
 from pyflink.datastream.state import (
     MapStateDescriptor,
-    ValueStateDescriptor,
 )
 
 DISCOVERY_WINDOW_SIZE = 20
+CONFORMANCE_SHARD_COUNT = 4
 DEFAULT_MAX_APPROX_ERROR = 0.05
-MODEL_RETRY_INTERVAL_MS = 200
 CONFORMANCE_EVENTS_OUTPUT_TAG = OutputTag(
     "conformance-events", Types.PICKLED_BYTE_ARRAY()
 )
 MODEL_UPDATE_OUTPUT_TAG = OutputTag(
     "model-updates", Types.PICKLED_BYTE_ARRAY()
 )
+
+
+def _get_case_shard(case):
+    case_digest = hashlib.sha256(case.encode("utf-8")).digest()
+    return int.from_bytes(case_digest[:4], byteorder="big") % CONFORMANCE_SHARD_COUNT
+
 
 class CreateDirectlyFollowsWindowOperator(WindowFunction):
     def __init__(self, max_approx_error):
@@ -135,6 +140,7 @@ class DiscoverModelFromWindowOperator(KeyedProcessFunction):
                     "final_marking": model[2],
                 }
             ),
+            timestamp=int(events[-1].timestamp.timestamp() * 1000),
         )
         yield MODEL_UPDATE_OUTPUT_TAG, model_update
 
@@ -144,10 +150,12 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
         self.models_descriptor = models_descriptor
 
     def open(self, runtime_context):
-        case_state_descriptor = ValueStateDescriptor(
-            "case-conformance-state", Types.PICKLED_BYTE_ARRAY()
+        case_states_descriptor = MapStateDescriptor(
+            "shard-case-conformance-states",
+            Types.STRING(),
+            Types.PICKLED_BYTE_ARRAY(),
         )
-        self.case_state = runtime_context.get_state(case_state_descriptor)
+        self.case_states = runtime_context.get_map_state(case_states_descriptor)
 
     def _reprocess_pending_events(self, case_state, encoded_model):
         model = pickle.loads(base64.b64decode(encoded_model))
@@ -178,7 +186,7 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
         )
 
     def process_element(self, event, context):
-        case_state = self.case_state.value()
+        case_state = self.case_states.get(event.case)
         if case_state is None:
             if event.model_version is None:
                 return
@@ -189,41 +197,42 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
             )
 
         case_state.pending_events.append(event)
-        self.case_state.update(case_state)
-        encoded_model = context.get_broadcast_state(self.models_descriptor).get(
-            case_state.model_version
-        )
-        if encoded_model is None:
-            retry_time = (
-                context.timer_service().current_processing_time()
-                + MODEL_RETRY_INTERVAL_MS
-            )
-            context.timer_service().register_processing_time_timer(retry_time)
-            return
+        self.case_states.put(event.case, case_state)
 
-        for score in self._reprocess_pending_events(case_state, encoded_model):
-            yield score
-        self.case_state.update(case_state)
+        event_timestamp = context.timestamp()
+        if event_timestamp is not None:
+            context.timer_service().register_event_time_timer(event_timestamp + 1)
+
+        broadcast_models = context.get_broadcast_state(self.models_descriptor)
+        for case, pending_case_state in list(self.case_states.items()):
+            if not pending_case_state.pending_events:
+                continue
+
+            encoded_model = broadcast_models.get(pending_case_state.model_version)
+            if encoded_model is None:
+                continue
+
+            for score in self._reprocess_pending_events(
+                pending_case_state, encoded_model
+            ):
+                yield score
+            self.case_states.put(case, pending_case_state)
 
     def on_timer(self, timestamp, context):
-        case_state = self.case_state.value()
-        if case_state is None or not case_state.pending_events:
-            return
+        broadcast_models = context.get_broadcast_state(self.models_descriptor)
+        for case, pending_case_state in list(self.case_states.items()):
+            if not pending_case_state.pending_events:
+                continue
 
-        encoded_model = context.get_broadcast_state(self.models_descriptor).get(
-            case_state.model_version
-        )
-        if encoded_model is None:
-            retry_time = (
-                context.timer_service().current_processing_time()
-                + MODEL_RETRY_INTERVAL_MS
-            )
-            context.timer_service().register_processing_time_timer(retry_time)
-            return
+            encoded_model = broadcast_models.get(pending_case_state.model_version)
+            if encoded_model is None:
+                continue
 
-        for score in self._reprocess_pending_events(case_state, encoded_model):
-            yield score
-        self.case_state.update(case_state)
+            for score in self._reprocess_pending_events(
+                pending_case_state, encoded_model
+            ):
+                yield score
+            self.case_states.put(case, pending_case_state)
 
 
 class CollectLatestScoresOperator(KeyedProcessFunction):
@@ -272,7 +281,12 @@ def _get_sink(output_path):
 
 class EventTimestampAssigner(TimestampAssigner):
     def extract_timestamp(self, value, record_timestamp) -> int:
-        return int(value[2].timestamp())
+        return int(value[2].timestamp() * 1000)
+
+
+class ModelUpdateTimestampAssigner(TimestampAssigner):
+    def extract_timestamp(self, model_update, record_timestamp) -> int:
+        return model_update.timestamp
 
 def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
     events = FileInput().read_ordered_events(input_path)
@@ -303,15 +317,27 @@ def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
         .process(DiscoverModelFromWindowOperator(), output_type=Types.PICKLED_BYTE_ARRAY())
     )
 
-    model_updates = discovery_results.get_side_output(MODEL_UPDATE_OUTPUT_TAG)
+    model_updates = (
+        discovery_results.get_side_output(MODEL_UPDATE_OUTPUT_TAG)
+        .assign_timestamps_and_watermarks(
+            WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10))
+            .with_timestamp_assigner(ModelUpdateTimestampAssigner())
+        )
+    )
     models_descriptor = MapStateDescriptor("discovered-models", Types.INT(), Types.STRING())
 
     (
         split_events.get_side_output(CONFORMANCE_EVENTS_OUTPUT_TAG)
-        .key_by(lambda event: event.case, key_type=Types.STRING())
+        .key_by(
+            lambda event: _get_case_shard(event.case),
+            key_type=Types.INT(),
+        )
         .connect(model_updates.broadcast(models_descriptor))
-        .process(ConformanceOperator(models_descriptor),output_type=Types.STRING())
-        .set_parallelism(4)
+        .process(
+            ConformanceOperator(models_descriptor),
+            output_type=Types.STRING(),
+        )
+        .set_parallelism(CONFORMANCE_SHARD_COUNT)
         .key_by(lambda _score: "global", key_type=Types.STRING())
         .process(CollectLatestScoresOperator(), output_type=Types.STRING())
         .sink_to(_get_sink(output_path))

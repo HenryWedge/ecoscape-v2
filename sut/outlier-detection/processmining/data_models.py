@@ -1,5 +1,5 @@
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -38,5 +38,5 @@ class DiscoveryWindow:
 @dataclass
 class CaseConformanceState:
     model_version: int
-    alignment_state: object | None
     pending_events: list[ProcessEvent]
+    processed_events: list[ProcessEvent] = field(default_factory=list)

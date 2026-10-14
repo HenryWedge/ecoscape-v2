@@ -9,7 +9,7 @@ import math
 import pickle
 from pathlib import Path
 from processmining.model_discovery import ModelDiscovery
-from processmining.conformance_checker import ConformanceChecker
+from processmining.prefix_alignment import PrefixAlignmentRecalculator
 from processmining.input import FileInput
 from processmining.data_models import (
     CaseConformanceState,
@@ -187,31 +187,49 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
         )
         self.case_states = runtime_context.get_map_state(case_states_descriptor)
 
-    def _reprocess_pending_events(self, case_state, encoded_model):
-        model = pickle.loads(base64.b64decode(encoded_model))
-
-        if case_state.alignment_state is None:
-            first_event = case_state.pending_events[0]
-            case_state.alignment_state = ConformanceChecker().create_prefix_alignment_state(
-                first_event.case, model
-            )
+    def _reprocess_pending_events(self, case_state, broadcast_models):
+        if not hasattr(case_state, "processed_events"):
+            case_state.processed_events = []
 
         scores = []
-        for event in case_state.pending_events:
-            try:
-                score = case_state.alignment_state.add_event(event.activity)
-                print(event.sequence)
-                scores.append(
-                    json.dumps(
-                        {"case": event.case, "event": event.sequence, "score": score},
-                        separators=(",", ":"),
-                    )
-                )
-            except TypeError:
-                print("Failure")
-                case_state.alignment_state.add_event(event.activity)
+        remaining_events = []
+        prefix_alignment_recalculator = PrefixAlignmentRecalculator()
 
-        case_state.pending_events.clear()
+        for event_index, event in enumerate(case_state.pending_events):
+            event_model_version = event.model_version
+            if event_model_version is None:
+                remaining_events.append(event)
+                continue
+
+            encoded_event_model = broadcast_models.get(event_model_version)
+            if encoded_event_model is None:
+                remaining_events.extend(case_state.pending_events[event_index:])
+                break
+
+            event_model = pickle.loads(base64.b64decode(encoded_event_model))
+            activities = [
+                processed_event.activity for processed_event in case_state.processed_events
+            ]
+            activities.append(event.activity)
+            score = prefix_alignment_recalculator.calculate_cost(
+                activities, event_model
+            )
+            print(
+                "Prefix alignment cost calculated: "
+                f"case={event.case!r}, event={event.sequence}, "
+                f"activity={event.activity!r}, "
+                f"model_version={event_model_version}, cost={score}"
+            )
+            case_state.processed_events.append(event)
+            case_state.model_version = event_model_version
+            scores.append(
+                json.dumps(
+                    {"case": event.case, "event": event.sequence, "score": score},
+                    separators=(",", ":"),
+                )
+            )
+
+        case_state.pending_events = remaining_events
         return scores
 
     def process_broadcast_element(self, model_update, context):
@@ -226,7 +244,6 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
                 return
             case_state = CaseConformanceState(
                 model_version=event.model_version,
-                alignment_state=None,
                 pending_events=[],
             )
 
@@ -238,12 +255,8 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
             if not pending_case_state.pending_events:
                 continue
 
-            encoded_model = broadcast_models.get(pending_case_state.model_version)
-            if encoded_model is None:
-                continue
-
             for score in self._reprocess_pending_events(
-                pending_case_state, encoded_model
+                pending_case_state, broadcast_models
             ):
                 yield score
             self.case_states.put(case, pending_case_state)
@@ -254,12 +267,8 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
             if not pending_case_state.pending_events:
                 continue
 
-            encoded_model = broadcast_models.get(pending_case_state.model_version)
-            if encoded_model is None:
-                continue
-
             for score in self._reprocess_pending_events(
-                pending_case_state, encoded_model
+                pending_case_state, broadcast_models
             ):
                 yield score
             self.case_states.put(case, pending_case_state)

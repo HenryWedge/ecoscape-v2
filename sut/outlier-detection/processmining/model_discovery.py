@@ -8,9 +8,7 @@ class ModelDiscovery:
     ) -> DirectlyFollowsData:
         traces_by_case = defaultdict(list)
         for event in events:
-            traces_by_case[event.case].append(
-                (event.timestamp, event.activity)
-            )
+            traces_by_case[event.case].append((event.sequence, event.activity))
 
         directly_follows_graph = Counter()
         activities_occurrences = Counter()

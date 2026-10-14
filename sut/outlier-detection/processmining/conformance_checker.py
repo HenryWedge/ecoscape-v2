@@ -12,13 +12,13 @@ class PrefixAlignmentState:
         self.alignment_operator = alignment_operator
 
     def add_event(self, activity):
-        """Add one event and return the cost of the resulting prefix."""
         self.alignment_operator.transform(BEvent(activity, self.case))
         case_state = self.alignment_operator.get_trace_conformance(self.case)
         return case_state.alignment[-1].cost
 
 
 class ConformanceChecker:
+
     def create_prefix_alignment_state(self, case, model):
         net = model["net"]
         log_cost_function = {

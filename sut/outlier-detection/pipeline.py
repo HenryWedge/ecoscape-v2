@@ -1,7 +1,8 @@
-"""Finite-file PyFlink pipeline for process discovery and conformance scoring."""
+"""PyFlink pipeline for process discovery and conformance scoring."""
 
 import argparse
 import base64
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -17,11 +18,12 @@ from processmining.data_models import (
     ProcessEvent,
 )
 
-from pyflink.common import Configuration, Types, WatermarkStrategy, Time, Duration
-from pyflink.common.serialization import Encoder
+from pyflink.common import Configuration, Types, WatermarkStrategy, Duration
+from pyflink.common.serialization import Encoder, SimpleStringSchema
 from pyflink.common.watermark_strategy import TimestampAssigner
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.datastream.checkpointing_mode import CheckpointingMode
+from pyflink.datastream.connectors.kafka import KafkaOffsetsInitializer, KafkaSource
 from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig
 from pyflink.datastream.execution_mode import RuntimeExecutionMode
 from pyflink.datastream.functions import (
@@ -33,6 +35,7 @@ from pyflink.datastream.functions import (
 from pyflink.datastream.output_tag import OutputTag
 from pyflink.datastream.state import (
     MapStateDescriptor,
+    ValueStateDescriptor,
 )
 
 DISCOVERY_WINDOW_SIZE = 20
@@ -56,7 +59,7 @@ class CreateDirectlyFollowsWindowOperator(WindowFunction):
         self.max_approx_error = max_approx_error
 
     def apply(self, key, window, events):
-        events = sorted(events, key=lambda event: event.timestamp)
+        events = sorted(events, key=lambda event: event.sequence)
         filtered_events = self._filter_discovery_events(events, self.max_approx_error)
         directly_follows_data = None
         if filtered_events:
@@ -120,6 +123,33 @@ class SplitDiscoveryAndConformanceEvents(ProcessFunction):
             )
 
 
+class ParseKafkaEvent(KeyedProcessFunction):
+    def open(self, runtime_context):
+        sequence_descriptor = ValueStateDescriptor("global-event-sequence", Types.LONG())
+        self.sequence_state = runtime_context.get_state(sequence_descriptor)
+
+    def process_element(self, message, context):
+        event_data = json.loads(message)
+        if not isinstance(event_data, dict):
+            raise ValueError("Kafka message must be a JSON object")
+
+        case = (event_data.get("caseid") or "").strip()
+        activity = (event_data.get("activity") or "").strip()
+        timestamp_text = (event_data.get("timestamp") or "").strip()
+        if not case or not activity or not timestamp_text:
+            raise ValueError("Kafka message must contain caseid, activity, and timestamp")
+
+        timestamp = datetime.fromisoformat(timestamp_text.replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+        sequence = self.sequence_state.value()
+        if sequence is None:
+            sequence = 0
+        self.sequence_state.update(sequence + 1)
+        yield case, activity, timestamp, sequence
+
+
 class DiscoverModelFromWindowOperator(KeyedProcessFunction):
     def _serialize_model(self, model):
         return base64.b64encode(pickle.dumps(model)).decode("ascii")
@@ -168,14 +198,18 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
 
         scores = []
         for event in case_state.pending_events:
-            score = case_state.alignment_state.add_event(event.activity)
-            print(event.sequence)
-            scores.append(
-                json.dumps(
-                    {"case": event.case, "event": event.sequence, "score": score},
-                    separators=(",", ":"),
+            try:
+                score = case_state.alignment_state.add_event(event.activity)
+                print(event.sequence)
+                scores.append(
+                    json.dumps(
+                        {"case": event.case, "event": event.sequence, "score": score},
+                        separators=(",", ":"),
+                    )
                 )
-            )
+            except TypeError:
+                print("Failure")
+                case_state.alignment_state.add_event(event.activity)
 
         case_state.pending_events.clear()
         return scores
@@ -198,10 +232,6 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
 
         case_state.pending_events.append(event)
         self.case_states.put(event.case, case_state)
-
-        event_timestamp = context.timestamp()
-        if event_timestamp is not None:
-            context.timer_service().register_event_time_timer(event_timestamp + 1)
 
         broadcast_models = context.get_broadcast_state(self.models_descriptor)
         for case, pending_case_state in list(self.case_states.items()):
@@ -266,6 +296,18 @@ def _get_environment(configuration):
     environment.enable_checkpointing(10_000, CheckpointingMode.EXACTLY_ONCE)
     return environment
 
+
+def _get_kafka_source(bootstrap_servers, topic, group_id):
+    return (
+        KafkaSource.builder()
+        .set_bootstrap_servers(bootstrap_servers)
+        .set_topics(topic)
+        .set_group_id(group_id)
+        .set_starting_offsets(KafkaOffsetsInitializer.earliest())
+        .set_value_only_deserializer(SimpleStringSchema())
+        .build()
+    )
+
 def _get_sink(output_path):
     output_file_config = (
         OutputFileConfig.builder()
@@ -288,14 +330,42 @@ class ModelUpdateTimestampAssigner(TimestampAssigner):
     def extract_timestamp(self, model_update, record_timestamp) -> int:
         return model_update.timestamp
 
-def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
-    events = FileInput().read_ordered_events(input_path)
-    event_data = [
-        (event.case, event.activity, event.timestamp, event.sequence)
-        for event in events
-    ]
+def run_pipeline(
+    input_path,
+    output_path,
+    checkpoint_dir,
+    max_approx_error,
+    source_type="kafka",
+    kafka_bootstrap_servers="192.168.49.2:32090",
+    kafka_topic="line",
+    kafka_group_id="cc",
+    kafka_connector_jar="flink-sql-connector-kafka-5.0.0-2.2.jar",
+):
     configuration = _get_configuration(checkpoint_dir)
     environment = _get_environment(configuration)
+
+    if source_type == "file":
+        events = FileInput().read_ordered_events(input_path)
+        event_data = [
+            (event.case, event.activity, event.timestamp, event.sequence)
+            for event in events
+        ]
+        event_stream = environment.from_collection(event_data)
+    else:
+        environment.add_jars(Path(kafka_connector_jar).resolve().as_uri())
+        kafka_source = _get_kafka_source(
+            kafka_bootstrap_servers, kafka_topic, kafka_group_id
+        )
+        event_stream = (
+            environment.from_source(
+                kafka_source,
+                WatermarkStrategy.no_watermarks(),
+                "kafka-event-source",
+            )
+            .key_by(lambda _message: "global", key_type=Types.STRING())
+            .process(ParseKafkaEvent(), output_type=Types.PICKLED_BYTE_ARRAY())
+            .set_parallelism(1)
+        )
 
     watermark_strategy = (
         WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10))
@@ -303,7 +373,7 @@ def run_pipeline(input_path, output_path, checkpoint_dir, max_approx_error):
     )
 
     split_events = (
-        environment.from_collection(event_data)
+        event_stream
         .assign_timestamps_and_watermarks(watermark_strategy)
         .process(SplitDiscoveryAndConformanceEvents(),output_type=Types.PICKLED_BYTE_ARRAY())
     )
@@ -349,6 +419,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", default="input.csv", help="Input CSV file")
     parser.add_argument(
+        "--source", choices=("file", "kafka"), default="file", help="Input source"
+    )
+    parser.add_argument("--kafka-bootstrap-servers", help="Kafka bootstrap servers")
+    parser.add_argument("--kafka-topic", help="Kafka topic")
+    parser.add_argument("--kafka-group-id", help="Kafka consumer group ID")
+    parser.add_argument(
+        "--kafka-connector-jar",
+        help="Path to the Kafka connector JAR compatible with the Flink runtime",
+    )
+    parser.add_argument(
         "--output",
         default="output",
         help="Output directory for JSONL part files"
@@ -367,14 +447,31 @@ def main():
     args = parser.parse_args()
     if not 0 < args.max_approx_error <= 1:
         parser.error("--max-approx-error must be greater than 0 and at most 1")
-    if not Path(args.input).is_file():
+    if args.source == "file" and not Path(args.input).is_file():
         parser.error(f"input CSV does not exist: {args.input}")
+    if args.source == "kafka":
+        kafka_arguments = {
+            "--kafka-bootstrap-servers": args.kafka_bootstrap_servers,
+            "--kafka-topic": args.kafka_topic,
+            "--kafka-group-id": args.kafka_group_id,
+            "--kafka-connector-jar": args.kafka_connector_jar,
+        }
+        for argument, value in kafka_arguments.items():
+            if not value:
+                parser.error(f"{argument} is required when --source kafka")
+        if not Path(args.kafka_connector_jar).is_file():
+            parser.error(f"Kafka connector JAR does not exist: {args.kafka_connector_jar}")
 
     run_pipeline(
         args.input,
         args.output,
         args.checkpoint_dir,
         args.max_approx_error,
+        #source_type=args.source,
+        #kafka_bootstrap_servers=args.kafka_bootstrap_servers,
+        #kafka_topic=args.kafka_topic,
+        #kafka_group_id=args.kafka_group_id,
+        #kafka_connector_jar=args.kafka_connector_jar,
     )
 
 if __name__ == "__main__":

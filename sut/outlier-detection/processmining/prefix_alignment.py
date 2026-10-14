@@ -10,6 +10,9 @@ class PrefixAlignmentRecalculator:
     MAX_EXPLORED_STATES = 100_000
 
     def calculate_cost(self, activities, model):
+        return self.calculate_alignment(activities, model)["cost"]
+
+    def calculate_alignment(self, activities, model):
         net = model["net"]
         initial_marking = model["initial_marking"]
         ordered_places = sorted(net.places, key=lambda place: place.name)
@@ -25,11 +28,11 @@ class PrefixAlignmentRecalculator:
         initial_state = (0, initial_marking)
         initial_key = state_key(*initial_state)
         lowest_cost_by_state = {initial_key: 0}
-        heapq.heappush(queue, (0, next(insertion_order), initial_state))
+        heapq.heappush(queue, (0, next(insertion_order), initial_state, [], []))
 
         explored_states = 0
         while queue:
-            cost, _, (activity_index, marking) = heapq.heappop(queue)
+            cost, _, (activity_index, marking), log_path, model_path = heapq.heappop(queue)
             current_key = state_key(activity_index, marking)
             if cost != lowest_cost_by_state.get(current_key):
                 continue
@@ -42,7 +45,11 @@ class PrefixAlignmentRecalculator:
                 )
 
             if activity_index == len(activity_sequence):
-                return float(cost)
+                return {
+                    "cost": float(cost),
+                    "log_path": log_path,
+                    "model_path": model_path,
+                }
 
             self._add_search_state(
                 queue,
@@ -52,18 +59,20 @@ class PrefixAlignmentRecalculator:
                 marking,
                 cost + 1,
                 ordered_places,
+                log_path + [activity_sequence[activity_index]],
+                model_path + [None],
             )
 
-            for transition in net.transitions:
+            for transition in sorted(net.transitions, key=lambda item: item.name):
                 if not is_enabled(transition, net, marking):
                     continue
 
                 next_marking = execute(transition, net, marking)
                 transition_label = transition.label
-                if transition_label is None:
-                    model_move_cost = 0
-                else:
-                    model_move_cost = 1
+                model_move_cost = 0 if transition_label is None else 1
+                model_path_step = (
+                    transition_label if transition_label is not None else transition.name
+                )
 
                 self._add_search_state(
                     queue,
@@ -73,6 +82,8 @@ class PrefixAlignmentRecalculator:
                     next_marking,
                     cost + model_move_cost,
                     ordered_places,
+                    log_path + [None],
+                    model_path + [model_path_step],
                 )
 
                 if transition_label == activity_sequence[activity_index]:
@@ -84,6 +95,8 @@ class PrefixAlignmentRecalculator:
                         next_marking,
                         cost,
                         ordered_places,
+                        log_path + [activity_sequence[activity_index]],
+                        model_path + [model_path_step],
                     )
 
         raise RuntimeError("No prefix alignment could be found for the observed events")
@@ -97,6 +110,8 @@ class PrefixAlignmentRecalculator:
         marking,
         cost,
         ordered_places,
+        log_path,
+        model_path,
     ):
         marking_key = tuple(marking.get(place, 0) for place in ordered_places)
         state_key = activity_index, marking_key
@@ -106,5 +121,11 @@ class PrefixAlignmentRecalculator:
         lowest_cost_by_state[state_key] = cost
         heapq.heappush(
             queue,
-            (cost, next(insertion_order), (activity_index, marking)),
+            (
+                cost,
+                next(insertion_order),
+                (activity_index, marking),
+                log_path,
+                model_path,
+            ),
         )

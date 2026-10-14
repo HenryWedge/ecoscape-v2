@@ -37,6 +37,5 @@ class DiscoveryWindow:
 
 @dataclass
 class CaseConformanceState:
-    model_version: int
     pending_events: list[ProcessEvent]
     processed_events: list[ProcessEvent] = field(default_factory=list)

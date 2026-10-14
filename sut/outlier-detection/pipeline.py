@@ -38,9 +38,9 @@ from pyflink.datastream.state import (
     ValueStateDescriptor,
 )
 
-DISCOVERY_WINDOW_SIZE = 20
+DISCOVERY_WINDOW_SIZE = 200
 CONFORMANCE_SHARD_COUNT = 4
-DEFAULT_MAX_APPROX_ERROR = 0.05
+DEFAULT_MAX_APPROX_ERROR = 0.01
 CONFORMANCE_EVENTS_OUTPUT_TAG = OutputTag(
     "conformance-events", Types.PICKLED_BYTE_ARRAY()
 )
@@ -186,6 +186,44 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
             Types.PICKLED_BYTE_ARRAY(),
         )
         self.case_states = runtime_context.get_map_state(case_states_descriptor)
+        self.logged_model_versions = set()
+
+    def _log_model_structure(self, model_version, model):
+        if model_version in self.logged_model_versions:
+            return
+
+        net = model["net"]
+        transitions = []
+        for transition in sorted(net.transitions, key=lambda item: item.name):
+            input_places = sorted(
+                (
+                    f"{arc.source.name}:{arc.weight}"
+                    for arc in transition.in_arcs
+                )
+            )
+            output_places = sorted(
+                (
+                    f"{arc.target.name}:{arc.weight}"
+                    for arc in transition.out_arcs
+                )
+            )
+            transitions.append(
+                {
+                    "name": transition.name,
+                    "label": transition.label,
+                    "input_places": input_places,
+                    "output_places": output_places,
+                }
+            )
+
+        print(
+            "Conformance model structure: "
+            f"model_version={model_version}, "
+            f"initial_marking={model['initial_marking']!r}, "
+            f"final_marking={model['final_marking']!r}, "
+            f"transitions={transitions!r}"
+        )
+        self.logged_model_versions.add(model_version)
 
     def _reprocess_pending_events(self, case_state, broadcast_models):
         if not hasattr(case_state, "processed_events"):
@@ -207,24 +245,31 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
                 break
 
             event_model = pickle.loads(base64.b64decode(encoded_event_model))
+            self._log_model_structure(event_model_version, event_model)
             activities = [
                 processed_event.activity for processed_event in case_state.processed_events
             ]
             activities.append(event.activity)
-            score = prefix_alignment_recalculator.calculate_cost(
+            alignment = prefix_alignment_recalculator.calculate_alignment(
                 activities, event_model
             )
             print(
                 "Prefix alignment cost calculated: "
                 f"case={event.case!r}, event={event.sequence}, "
                 f"activity={event.activity!r}, "
-                f"model_version={event_model_version}, cost={score}"
+                f"model_version={event_model_version}, "
+                f"cost={alignment['cost']}, "
+                f"log_path={alignment['log_path']!r}, "
+                f"model_path={alignment['model_path']!r}"
             )
             case_state.processed_events.append(event)
-            case_state.model_version = event_model_version
             scores.append(
                 json.dumps(
-                    {"case": event.case, "event": event.sequence, "score": score},
+                    {
+                        "case": event.case,
+                        "event": event.sequence,
+                        "score": alignment["cost"],
+                    },
                     separators=(",", ":"),
                 )
             )
@@ -243,7 +288,6 @@ class ConformanceOperator(KeyedBroadcastProcessFunction):
             if event.model_version is None:
                 return
             case_state = CaseConformanceState(
-                model_version=event.model_version,
                 pending_events=[],
             )
 
